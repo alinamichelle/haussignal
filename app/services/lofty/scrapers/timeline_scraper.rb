@@ -1,3 +1,5 @@
+require 'playwright'
+
 module Lofty
   module Scrapers
     class TimelineScraper
@@ -17,29 +19,63 @@ module Lofty
             raise "Session state not found! Run: bin/rails lofty:login"
           end
 
-          context = browser.new_context(storage_state: @storage_state_path.to_s)
+          context = browser.new_context(storageState: @storage_state_path.to_s)
           page    = context.new_page
 
           url = "#{ENV['LOFTY_BASE_URL']}/admin/home/detail?leadId=#{lofty_lead_id}"
           Rails.logger.info "🔵 Scraping: #{url}"
           
-          page.goto(url, wait_until: 'networkidle')
+          page.goto(url, waitUntil: 'networkidle')
           page.wait_for_timeout(3000)
 
           # Auto-scroll to load all timeline items
           auto_scroll(page)
 
-          # Extract all timeline items
+          # Extract all timeline items with full metadata
           items = page.eval_on_selector_all(
             @selectors['timeline_item'],
             <<~JS
-              elements => elements.map(el => ({
-                eventId: el.getAttribute('#{@selectors['timeline_id_attr']}'),
-                typeCode: parseInt(el.getAttribute('#{@selectors['timeline_type_attr']}') || '0', 10),
-                timestampText: (el.querySelector('#{@selectors['timestamp']}') || {}).innerText || '',
-                rawText: (el.querySelector('#{@selectors['content']}') || {}).innerText || '',
-                audioUrl: el.querySelector('#{@selectors['audio']}') ? el.querySelector('#{@selectors['audio']}').getAttribute('src') : null
-              }))
+              elements => elements.map(el => {
+                // Extract all data-* attributes
+                const dataAttributes = {};
+                Array.from(el.attributes).forEach(attr => {
+                  if (attr.name.startsWith('data-')) {
+                    dataAttributes[attr.name.replace('data-', '')] = attr.value;
+                  }
+                });
+                
+                // Extract CSS classes
+                const cssClasses = Array.from(el.classList);
+                
+                // Get HTML content for detailed parsing
+                const contentEl = el.querySelector('#{@selectors['content']}');
+                const htmlContent = contentEl ? contentEl.innerHTML : '';
+                
+                // Extract all possible email metadata from data attributes
+                const emailId = el.getAttribute('data-email-id') || 
+                               el.getAttribute('data-emailid') ||
+                               el.getAttribute('data-message-id') || '';
+                               
+                const emailSubject = el.getAttribute('data-email-subject') ||
+                                    el.getAttribute('data-subject') || '';
+                                    
+                const emailType = el.getAttribute('data-email-type') ||
+                                 el.getAttribute('data-type') || '';
+                
+                return {
+                  eventId: el.getAttribute('#{@selectors['timeline_id_attr']}'),
+                  typeCode: parseInt(el.getAttribute('#{@selectors['timeline_type_attr']}') || '0', 10),
+                  timestampText: (el.querySelector('#{@selectors['timestamp']}') || {}).innerText || '',
+                  rawText: (el.querySelector('#{@selectors['content']}') || {}).innerText || '',
+                  audioUrl: el.querySelector('#{@selectors['audio']}') ? el.querySelector('#{@selectors['audio']}').getAttribute('src') : null,
+                  htmlContent: htmlContent,
+                  dataAttributes: dataAttributes,
+                  cssClasses: cssClasses,
+                  emailId: emailId,
+                  emailSubject: emailSubject,
+                  emailType: emailType
+                };
+              })
             JS
           )
 
@@ -55,7 +91,10 @@ module Lofty
               type_code: item['typeCode'],
               timestamp_text: item['timestampText'],
               raw_text: item['rawText'],
-              audio_url: item['audioUrl']
+              audio_url: item['audioUrl'],
+              html_content: item['htmlContent'],
+              data_attributes: item['dataAttributes'],
+              css_classes: item['cssClasses']
             )
           end
 
@@ -78,29 +117,63 @@ module Lofty
             raise "Session state not found! Run: bin/rails lofty:login"
           end
 
-          context = browser.new_context(storage_state: @storage_state_path.to_s)
+          context = browser.new_context(storageState: @storage_state_path.to_s)
           page    = context.new_page
 
           url = "#{ENV['LOFTY_BASE_URL']}/admin/home/detail?leadId=#{lofty_lead_id}"
           Rails.logger.info "🔵 Scraping: #{url}"
           
-          page.goto(url, wait_until: 'networkidle')
+          page.goto(url, waitUntil: 'networkidle')
           page.wait_for_timeout(3000)
 
           # Auto-scroll to load all timeline items
           auto_scroll(page)
 
-          # Extract all timeline items
+          # Extract all timeline items with full metadata
           items = page.eval_on_selector_all(
             @selectors['timeline_item'],
             <<~JS
-              elements => elements.map(el => ({
-                eventId: el.getAttribute('#{@selectors['timeline_id_attr']}'),
-                typeCode: parseInt(el.getAttribute('#{@selectors['timeline_type_attr']}') || '0', 10),
-                timestampText: (el.querySelector('#{@selectors['timestamp']}') || {}).innerText || '',
-                rawText: (el.querySelector('#{@selectors['content']}') || {}).innerText || '',
-                audioUrl: el.querySelector('#{@selectors['audio']}') ? el.querySelector('#{@selectors['audio']}').getAttribute('src') : null
-              }))
+              elements => elements.map(el => {
+                // Extract all data-* attributes
+                const dataAttributes = {};
+                Array.from(el.attributes).forEach(attr => {
+                  if (attr.name.startsWith('data-')) {
+                    dataAttributes[attr.name.replace('data-', '')] = attr.value;
+                  }
+                });
+                
+                // Extract CSS classes
+                const cssClasses = Array.from(el.classList);
+                
+                // Get HTML content for detailed parsing
+                const contentEl = el.querySelector('#{@selectors['content']}');
+                const htmlContent = contentEl ? contentEl.innerHTML : '';
+                
+                // Extract all possible email metadata from data attributes
+                const emailId = el.getAttribute('data-email-id') || 
+                               el.getAttribute('data-emailid') ||
+                               el.getAttribute('data-message-id') || '';
+                               
+                const emailSubject = el.getAttribute('data-email-subject') ||
+                                    el.getAttribute('data-subject') || '';
+                                    
+                const emailType = el.getAttribute('data-email-type') ||
+                                 el.getAttribute('data-type') || '';
+                
+                return {
+                  eventId: el.getAttribute('#{@selectors['timeline_id_attr']}'),
+                  typeCode: parseInt(el.getAttribute('#{@selectors['timeline_type_attr']}') || '0', 10),
+                  timestampText: (el.querySelector('#{@selectors['timestamp']}') || {}).innerText || '',
+                  rawText: (el.querySelector('#{@selectors['content']}') || {}).innerText || '',
+                  audioUrl: el.querySelector('#{@selectors['audio']}') ? el.querySelector('#{@selectors['audio']}').getAttribute('src') : null,
+                  htmlContent: htmlContent,
+                  dataAttributes: dataAttributes,
+                  cssClasses: cssClasses,
+                  emailId: emailId,
+                  emailSubject: emailSubject,
+                  emailType: emailType
+                };
+              })
             JS
           )
 
@@ -113,7 +186,10 @@ module Lofty
               type_code: item['typeCode'],
               timestamp_text: item['timestampText'],
               raw_text: item['rawText'],
-              audio_url: item['audioUrl']
+              audio_url: item['audioUrl'],
+              html_content: item['htmlContent'],
+              data_attributes: item['dataAttributes'],
+              css_classes: item['cssClasses']
             )
           end
 

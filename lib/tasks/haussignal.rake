@@ -54,6 +54,55 @@ namespace :haussignal do
     service = Lofty::Sync::UnsubEventSyncService.new
     service.sync_for_multiple_leads(lofty_lead_ids)
   end
+  
+  desc "Sync email events (sent/opened) for a single lead"
+  task :sync_emails_one, [:lofty_lead_id] => :environment do |t, args|
+    unless args[:lofty_lead_id]
+      puts "❌ Usage: bin/rails haussignal:sync_emails_one[LOFTY_LEAD_ID]"
+      exit 1
+    end
+
+    service = Lofty::Sync::EmailEventSyncService.new
+    service.sync_for_lead(args[:lofty_lead_id])
+  end
+  
+  desc "Scrape lead details (pipeline, tasks, family, referral)"
+  task :scrape_lead_details, [:lofty_lead_id] => :environment do |t, args|
+    unless args[:lofty_lead_id]
+      puts "❌ Usage: bin/rails haussignal:scrape_lead_details[LOFTY_LEAD_ID]"
+      exit 1
+    end
+
+    scraper = Lofty::Scrapers::LeadDetailsScraper.new
+    details = scraper.scrape_lead_details(args[:lofty_lead_id])
+    
+    puts "\n" + "=" * 80
+    puts "LEAD DETAILS FOR: #{args[:lofty_lead_id]}"
+    puts "=" * 80
+    puts "\nPipeline: #{details[:pipeline] || '(not found)'}"
+    puts "Segment: #{details[:segment] || '(not found)'}"
+    puts "Referral Source: #{details[:referral_source] || '(not found)'}"
+    puts "Reg Date: #{details[:reg_date] || '(not found)'}"
+    
+    puts "\n" + "-" * 80
+    puts "TASKS (#{details[:tasks].length})"
+    puts "-" * 80
+    details[:tasks].each_with_index do |task, idx|
+      puts "\n#{idx + 1}. #{task[:name]}"
+      puts "   Description: #{task[:description]}" if task[:description].present?
+      puts "   Agent: #{task[:agent]}" if task[:agent].present?
+      puts "   Role: #{task[:role]}" if task[:role].present?
+    end
+    
+    puts "\n" + "-" * 80
+    puts "FAMILY MEMBERS (#{details[:family_members].length})"
+    puts "-" * 80
+    details[:family_members].each do |member|
+      puts "  - #{member}"
+    end
+    
+    puts "\n" + "=" * 80
+  end
 end
 
 namespace :unsub do
@@ -70,19 +119,67 @@ namespace :unsub do
 
     if unsubs.any?
       puts "\n📋 By category:"
-      category_counts = unsubs.pluck("metadata->>'unsub_category'").compact.tally
+      # Load in Ruby to avoid SQL injection warnings with user data
+      categories = unsubs.map { |e| e.metadata['unsubCategory'] || e.metadata['unsub_category'] }.compact
+      category_counts = categories.tally
       category_counts.sort_by { |k, v| -v }.each do |category, count|
         puts "  #{category.ljust(20)} #{count}"
       end
 
       puts "\n📨 Top offending subjects (campaigns with most unsubs):"
-      subject_counts = unsubs.pluck("metadata->>'unsubbedFromSubject'").compact.tally
+      # Try new format first
+      subject_counts = unsubs.map { |e| e.metadata.dig('triggerEmail', 'emailSubject') }.compact.tally
+      if subject_counts.empty?
+        # Fallback to old format (also load in Ruby to avoid SQL injection warnings)
+        subject_counts = unsubs.map { |e| e.metadata['unsubbedFromSubject'] }.compact.tally
+      end
+      
       if subject_counts.any?
         subject_counts.sort_by { |k, v| -v }.first(10).each do |subject, count|
           puts "  [#{count}x] #{subject[0..70]}"
         end
       else
         puts "  (No subjects captured - may need to refine email parsing)"
+      end
+      
+      # Enhanced insights
+      puts "\n🤖 AI Coaching Insights:"
+      
+      # Email type analysis
+      email_types = unsubs.map { |e| e.metadata.dig('triggerEmail', 'emailType') }.compact
+      if email_types.any?
+        type_counts = email_types.tally.sort_by { |k, v| -v }
+        puts "  Email types causing unsubs:"
+        type_counts.each do |type, count|
+          percentage = (count.to_f / email_types.length * 100).round(1)
+          puts "    #{type.ljust(20)} #{count} (#{percentage}%)"
+        end
+      end
+      
+      # Open behavior
+      open_statuses = unsubs.map { |e| e.metadata.dig('triggerEmail', 'openStatus') }.compact
+      if open_statuses.any?
+        opened_count = open_statuses.count('opened')
+        not_opened_count = open_statuses.count('not_opened')
+        puts "  \n  Open behavior:"
+        puts "    Opened before unsub:     #{opened_count} (#{(opened_count.to_f / open_statuses.length * 100).round(1)}%)"
+        puts "    Not opened before unsub: #{not_opened_count} (#{(not_opened_count.to_f / open_statuses.length * 100).round(1)}%)"
+      end
+      
+      # Quick unsubs
+      quick_unsubs = unsubs.select { |e| e.metadata.dig('triggerEmail', 'unsubContext', 'quickUnsubAfterOpen') }
+      if quick_unsubs.any?
+        puts "  \n  ⚡ Quick unsubs (within 5 min of opening): #{quick_unsubs.length}"
+      end
+      
+      # Timing analysis
+      timing_contexts = unsubs.map { |e| e.metadata.dig('triggerEmail', 'unsubContext', 'unsubTiming') }.compact
+      if timing_contexts.any?
+        timing_counts = timing_contexts.tally.sort_by { |k, v| -v }
+        puts "  \n  Timing patterns:"
+        timing_counts.each do |timing, count|
+          puts "    #{timing.ljust(15)} #{count}"
+        end
       end
 
       puts "\n👥 By agent:"
@@ -92,9 +189,13 @@ namespace :unsub do
         puts "  #{agent_name.ljust(20)} #{count}"
       end
       
-      # Data quality stats
-      missing_subjects = unsubs.count { |e| e.metadata['unsubbedFromSubject'].blank? }
-      missing_emails = unsubs.count { |e| e.metadata['unsubbedFromType'].blank? }
+      # Data quality stats (check both old and new formats)
+      missing_subjects = unsubs.count { |e| 
+        e.metadata.dig('triggerEmail', 'emailSubject').blank? && e.metadata['unsubbedFromSubject'].blank?
+      }
+      missing_emails = unsubs.count { |e| 
+        e.metadata.dig('triggerEmail', 'emailType').blank? && e.metadata['unsubbedFromType'].blank?
+      }
       
       if missing_subjects > 0 || missing_emails > 0
         puts "\n⚠️  Data Quality:"
@@ -105,9 +206,26 @@ namespace :unsub do
       puts "\n🕒 Recent unsubs (last 10):"
       unsubs.limit(10).each do |event|
         lead_name = event.lead.full_name || event.lead.email || event.lead.lofty_lead_id
-        category = event.metadata['unsub_category'] || 'unknown'
-        subject = event.metadata['unsubbedFromSubject']&.[](0..40) || '(no subject)'
-        puts "  #{event.occurred_at.strftime('%Y-%m-%d %H:%M')} | #{lead_name[0..20].ljust(22)} | #{subject}"
+        category = event.metadata['unsubCategory'] || event.metadata['unsub_category'] || 'unknown'
+        
+        # Try new format first, fallback to old format
+        trigger_email = event.metadata['triggerEmail']
+        if trigger_email
+          subject = trigger_email['emailSubject']&.[](0..40) || '(no subject)'
+          email_type = trigger_email['emailType'] || 'unknown'
+          open_status = trigger_email['openStatus'] == 'opened' ? '👁️' : '❌'
+          timing = if trigger_email['secondsFromSendToUnsub']
+            "#{(trigger_email['secondsFromSendToUnsub'] / 60.0).round(0)}m"
+          else
+            '?'
+          end
+          
+          puts "  #{event.occurred_at.strftime('%m-%d %H:%M')} | #{lead_name[0..18].ljust(20)} | #{open_status} #{timing.rjust(5)} | #{subject}"
+        else
+          # Fallback to old format
+          subject = event.metadata['unsubbedFromSubject']&.[](0..40) || '(no subject)'
+          puts "  #{event.occurred_at.strftime('%Y-%m-%d %H:%M')} | #{lead_name[0..20].ljust(22)} | #{subject}"
+        end
       end
     end
 

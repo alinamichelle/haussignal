@@ -3,6 +3,7 @@ module Lofty
     class UnsubEventSyncService
       def initialize
         @scraper = Lofty::Scrapers::TimelineScraper.new
+        @attributor = Lofty::UnsubAttributionService.new
       end
 
       def sync_for_lead(lofty_lead_id)
@@ -36,22 +37,61 @@ module Lofty
           # Extract category from raw text
           category = extract_unsub_category(unsub_entry.raw_text)
 
-          # Find the preceding email event
-          email_entry = find_preceding_email(all_entries, unsub_entry)
+          # Build base metadata
+          metadata = { 
+            unsubCategory: category,
+            leadBehavior: unsub_entry.raw_text
+          }
           
-          metadata = { unsub_category: category }
+          # Use attribution service to find trigger email and build full metadata
+          attribution = @attributor.attribute_unsub(unsub_entry, all_entries)
           
-          if email_entry
-            metadata[:unsubbedFromSubject] = extract_subject(email_entry.raw_text)
-            metadata[:unsubbedFromSentAt] = parse_timestamp(email_entry.timestamp_text).to_s
-            metadata[:unsubbedFromType] = type_code_to_name(email_entry.type_code)
+          if attribution
+            # Now match with actual opened events from the database
+            trigger_sent_event = find_sent_event_by_subject(
+              lead, 
+              attribution[:emailSubject], 
+              parse_timestamp(unsub_entry.timestamp_text)
+            )
             
-            if metadata[:unsubbedFromSubject].blank?
+            if trigger_sent_event
+              # Get all opened events for this lead
+              opened_events = Event.where(lead: lead, event_type: :email_opened)
+              
+              # Use matcher to find the correct open
+              matcher = Lofty::Matchers::EmailOpenMatcher.new(trigger_sent_event, opened_events)
+              matched_open = matcher.call
+              
+              # Rebuild attribution with matched open
+              if matched_open
+                attribution[:openedAt] = matched_open.occurred_at.iso8601
+                attribution[:openStatus] = 'opened'
+                
+                sent_at = trigger_sent_event.occurred_at
+                unsub_at = parse_timestamp(unsub_entry.timestamp_text)
+                
+                attribution[:secondsFromSendToOpen] = (matched_open.occurred_at - sent_at).to_i
+                attribution[:secondsFromOpenToUnsub] = (unsub_at - matched_open.occurred_at).to_i
+                attribution[:secondsFromSendToUnsub] = (unsub_at - sent_at).to_i
+                
+                # Update context flags
+                attribution[:unsubContext][:emailOpened] = true
+                attribution[:unsubContext][:unsubWithoutOpening] = false
+                
+                if attribution[:secondsFromOpenToUnsub] < 300
+                  attribution[:unsubContext][:quickUnsubAfterOpen] = true
+                end
+              end
+            end
+            
+            metadata[:triggerEmail] = attribution
+            
+            if attribution[:emailSubject].blank?
               Rails.logger.warn "⚠️  No subject parsed for email before unsub timeline_id=#{unsub_entry.event_id}"
               stats[:missing_subject] += 1
             end
           else
-            Rails.logger.warn "⚠️  No preceding email found for unsub timeline_id=#{unsub_entry.event_id} lead=#{lofty_lead_id}"
+            Rails.logger.warn "⚠️  No trigger email found for unsub timeline_id=#{unsub_entry.event_id} lead=#{lofty_lead_id}"
             stats[:missing_email] += 1
           end
 
@@ -71,7 +111,23 @@ module Lofty
             )
             event.save!
             stats[:new] += 1
-            Rails.logger.info "  ✅ Created unsub: #{unsub_entry.event_id} - #{category} - Subject: #{metadata[:unsubbedFromSubject]&.[](0..50)}"
+            
+            # Log with full attribution details
+            if attribution
+              subject = attribution[:emailSubject] || '(no subject)'
+              email_type = attribution[:emailType] || 'unknown'
+              open_status = attribution[:openStatus] || 'unknown'
+              time_info = if attribution[:secondsFromSendToUnsub]
+                "#{(attribution[:secondsFromSendToUnsub] / 60.0).round(1)} min after send"
+              else
+                'unknown timing'
+              end
+              
+              Rails.logger.info "  ✅ Created unsub: #{category} | #{email_type} | #{open_status} | #{time_info}"
+              Rails.logger.info "     Subject: #{subject[0..70]}"
+            else
+              Rails.logger.info "  ✅ Created unsub: #{unsub_entry.event_id} - #{category} - (no email attribution)"
+            end
           else
             stats[:skipped] += 1
           end
@@ -105,6 +161,15 @@ module Lofty
       end
 
       private
+      
+      def find_sent_event_by_subject(lead, subject, unsub_time)
+        return nil if subject.blank?
+        
+        Event.where(lead: lead, event_type: :email_sent)
+             .where("occurred_at < ?", unsub_time)
+             .order(occurred_at: :desc)
+             .find { |e| e.metadata['emailSubject'] == subject }
+      end
 
       def find_preceding_email(all_entries, unsub_entry)
         # Find the most recent email event (type 103 or 105) that occurred before the unsub
@@ -164,6 +229,16 @@ module Lofty
       def extract_unsub_category(raw_text)
         return 'unknown' if raw_text.blank?
 
+        # Parse from the actual text: "Micah unsubscribed from smart plans."
+        line = raw_text.lines.first.to_s.strip
+        
+        if line =~ /unsubscribed from ([^\.\n]+)/i
+          # Extract the category and normalize it
+          category = $1.strip.downcase.tr(' ', '_')
+          return category
+        end
+
+        # Fallback to pattern matching if parsing fails
         text_lower = raw_text.downcase
 
         case text_lower
@@ -171,10 +246,14 @@ module Lofty
           'seller_reports'
         when /home report/
           'home_reports'
-        when /market alert/
-          'market_alerts'
+        when /market alert/, /market report/
+          'market_reports'
         when /listing alert/
           'listing_alerts'
+        when /property alert/
+          'property_alerts'
+        when /smart plan/
+          'smart_plans'
         when /newsletter/
           'newsletter'
         when /email/
