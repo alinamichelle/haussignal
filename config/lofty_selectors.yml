@@ -1,0 +1,6 @@
+timeline_item: ".timeline-item"
+timeline_id_attr: "data-timeline-id"
+timeline_type_attr: "data-timeline-type"
+timestamp: ".timeline-timestamp"
+content: ".timeline-content"
+audio: "audio"
