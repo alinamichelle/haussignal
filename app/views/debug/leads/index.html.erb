@@ -1,0 +1,121 @@
+<h1>Leads Debug</h1>
+
+<div style="margin-bottom: 20px;">
+  <p>
+    Showing <%= @leads.size %> of <%= @total %> leads (page <%= @page %> of <%= (@total.to_f / @per_page).ceil %>)
+  </p>
+  
+  <div style="margin-bottom: 10px;">
+    <strong>Filter:</strong>
+    <%= link_to "All Leads (#{Lead.count})", debug_leads_path(filter: 'all'), style: (@filter == 'all' ? 'font-weight: bold; color: #1890ff;' : 'color: #666;') %>
+    |
+    <%= link_to "All Unsubs (#{Lead.left_joins(:events).where(events: { event_type: ['unsub', 'manual_unsub'] }).distinct.count})", debug_leads_path(filter: 'unsub_only'), style: (@filter == 'unsub_only' ? 'font-weight: bold; color: #1890ff;' : 'color: #666;') %>
+    |
+    <%= link_to "Auto Only (#{Lead.left_joins(:events).where(events: { event_type: 'unsub' }).distinct.count})", debug_leads_path(filter: 'auto_unsub'), style: (@filter == 'auto_unsub' ? 'font-weight: bold; color: #1890ff;' : 'color: #666;') %>
+    |
+    <%= link_to "Manual Only (#{Lead.left_joins(:events).where(events: { event_type: 'manual_unsub' }).distinct.count})", debug_leads_path(filter: 'manual_unsub'), style: (@filter == 'manual_unsub' ? 'font-weight: bold; color: #1890ff;' : 'color: #666;') %>
+    |
+    <%= link_to "Pending Verification (#{Lead.left_joins(:events).where(events: { id: nil }).count})", debug_leads_path(filter: 'pending'), style: (@filter == 'pending' ? 'font-weight: bold; color: #ff6b6b;' : 'color: #ff6b6b;') %>
+  </div>
+  
+  <div>
+    <% if @page > 1 %>
+      <%= link_to "← Previous", debug_leads_path(page: @page - 1, filter: @filter), style: 'color: #1890ff;' %>
+    <% else %>
+      <span style="color: #ccc;">← Previous</span>
+    <% end %>
+    
+    <span style="margin: 0 10px;">Page <%= @page %></span>
+    
+    <% if @page < (@total.to_f / @per_page).ceil %>
+      <%= link_to "Next →", debug_leads_path(page: @page + 1, filter: @filter), style: 'color: #1890ff;' %>
+    <% else %>
+      <span style="color: #ccc;">Next →</span>
+    <% end %>
+  </div>
+</div>
+
+<table border="1" cellspacing="0" cellpadding="6" style="border-collapse: collapse; width: 100%;">
+  <thead>
+    <tr style="background: #f0f0f0;">
+      <th>Lead</th>
+      <th>Lofty ID</th>
+      <th>Pipeline</th>
+      <th>Source</th>
+      <th>Reg Date</th>
+      <th>Unsubs</th>
+      <th>Emails Sent (by category)</th>
+      <th>Emails Opened</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    <% @leads.each do |lead| %>
+      <% events = lead.events %>
+      <% unsub_events = events.select { |e| e.event_type.to_s == "unsub" || e.event_type.to_s == "manual_unsub" } %>
+      <% has_unsub = unsub_events.any? %>
+      <% 
+        # Get the email category of the trigger email that caused the unsub
+        trigger_email_categories = unsub_events.map do |e|
+          # For auto unsubs, get the emailType from triggerEmail metadata
+          if e.event_type.to_s == "unsub"
+            email_type = e.metadata&.dig('triggerEmail', 'emailType')
+            
+            # If emailType is unknown, classify by subject line
+            if email_type == 'unknown' || email_type.blank?
+              subject = e.metadata&.dig('triggerEmail', 'emailSubject')
+              email_type = Lofty::EmailCategoryClassifier.classify(subject, nil) if subject.present?
+            end
+            
+            email_type
+          else
+            # For manual unsubs, we don't have a trigger email
+            nil
+          end
+        end.compact.uniq
+      %>
+      <% sent_events = events.select { |e| e.event_type.to_s == "email_sent" } %>
+      <% sent_count = sent_events.count %>
+      <% open_count = events.count { |e| e.event_type.to_s == "email_opened" } %>
+      <% 
+        # Group sent emails by category
+        category_counts = sent_events.group_by(&:email_category).transform_values(&:count)
+        categorized = category_counts.reject { |k, _| k.nil? }.values.sum
+        uncategorized = category_counts[nil] || 0
+      %>
+
+      <tr>
+        <td><%= lead.full_name.presence || "Unnamed" %></td>
+        <td><%= lead.lofty_lead_id %></td>
+        <td><%= lead.pipeline %></td>
+        <td><%= lead.source %></td>
+        <td><%= lead.reg_date&.strftime('%Y-%m-%d') %></td>
+        <td>
+          <% if has_unsub %>
+            <span style="background: #999; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.85em; font-weight: 500;">
+              UNSUB
+            </span>
+            <% if trigger_email_categories.any? %>
+              <br>
+              <span style="color: #666; font-size: 0.8em;">
+                <%= trigger_email_categories.map { |cat| cat.gsub('_', ' ').titleize }.join(', ') %>
+              </span>
+            <% end %>
+          <% else %>
+            <span style="color: #ccc;">—</span>
+          <% end %>
+        </td>
+        <td>
+          <%= sent_count %>
+          <% if categorized > 0 %>
+            <span style="color: #888; font-size: 0.85em;">(<%=categorized%> tagged)</span>
+          <% end %>
+        </td>
+        <td><%= open_count %></td>
+        <td>
+          <%= link_to "View timeline", debug_lead_path(lead), style: "text-decoration: none; color: #1890ff;" %>
+        </td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>

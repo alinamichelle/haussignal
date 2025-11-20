@@ -25,12 +25,14 @@ module Lofty
           missing_subject: 0
         }
 
-        # Filter for unsub events
-        unsub_entries = all_entries.select { |e| e.type_code == 113 }
+        # Filter for unsub events (both automatic and manual)
+        auto_unsub_entries = all_entries.select { |e| e.type_code == 113 }
+        manual_unsub_entries = all_entries.select { |e| e.type_code == 111 }
         
-        Rails.logger.info "📊 Found #{all_entries.length} total events, #{unsub_entries.length} unsubs"
+        Rails.logger.info "📊 Found #{all_entries.length} total events, #{auto_unsub_entries.length} auto unsubs, #{manual_unsub_entries.length} manual unsubs"
 
-        unsub_entries.each do |unsub_entry|
+        # Process automatic unsubs (type 113)
+        auto_unsub_entries.each do |unsub_entry|
           # Parse timestamp
           occurred_at = parse_timestamp(unsub_entry.timestamp_text)
           
@@ -128,6 +130,46 @@ module Lofty
             else
               Rails.logger.info "  ✅ Created unsub: #{unsub_entry.event_id} - #{category} - (no email attribution)"
             end
+          else
+            stats[:skipped] += 1
+          end
+        end
+
+        # Process manual unsubs (type 111)
+        manual_unsub_entries.each do |unsub_entry|
+          # Parse timestamp
+          occurred_at = parse_timestamp(unsub_entry.timestamp_text)
+          
+          # Extract category and agent from raw text
+          category = extract_manual_unsub_category(unsub_entry.raw_text)
+          agent_name = extract_agent_name(unsub_entry.raw_text)
+          
+          # Build metadata for manual unsub (no trigger email attribution)
+          metadata = { 
+            unsubCategory: category,
+            unsubType: 'manual',
+            performedBy: agent_name,
+            leadBehavior: unsub_entry.raw_text
+          }
+          
+          # Find or create event
+          event = Event.find_or_initialize_by(lofty_timeline_id: unsub_entry.event_id)
+
+          if event.new_record?
+            event.assign_attributes(
+              lead: lead,
+              org_id: ENV.fetch('ORG_ID', 'realty-haus'),
+              source: 'lofty',
+              type_code: unsub_entry.type_code,
+              event_type: :manual_unsub,
+              occurred_at: occurred_at,
+              raw_text: unsub_entry.raw_text,
+              metadata: metadata
+            )
+            event.save!
+            stats[:new] += 1
+            
+            Rails.logger.info "  ✅ Created manual unsub: #{category} by #{agent_name}"
           else
             stats[:skipped] += 1
           end
@@ -258,6 +300,41 @@ module Lofty
           'newsletter'
         when /email/
           'all_emails'
+        else
+          'unknown'
+        end
+      end
+
+      def extract_manual_unsub_category(raw_text)
+        return 'unknown' if raw_text.blank?
+
+        text_lower = raw_text.downcase
+
+        # Check for specific patterns in type 111 manual unsub events
+        if text_lower.include?('disabled mass mail') && text_lower.include?('auto text') && text_lower.include?('auto email')
+          'mass_mail_and_auto_messages'
+        elsif text_lower.include?('market report')
+          'market_reports'
+        elsif text_lower.include?('property alert')
+          'property_alerts'
+        elsif text_lower.include?('mass mail')
+          'mass_mail'
+        elsif text_lower.include?('auto text')
+          'auto_texts'
+        elsif text_lower.include?('auto email')
+          'auto_emails'
+        else
+          'unknown'
+        end
+      end
+
+      def extract_agent_name(raw_text)
+        return 'unknown' if raw_text.blank?
+
+        # Pattern: "Alina Michelle Villarreal disabled..."
+        # Extract the name before " disabled"
+        if raw_text =~ /^([^\n]+?)\s+disabled/i
+          $1.strip
         else
           'unknown'
         end

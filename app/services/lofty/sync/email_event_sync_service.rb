@@ -24,13 +24,19 @@ module Lofty
         }
 
         all_entries.each do |entry|
+          # Skip tasks
+          next if @classifier.is_task?(entry.raw_text)
+          
           # Process email sent events
-          if @classifier.is_email_sent?(entry.type_code)
+          if @classifier.is_email_sent?(entry.type_code, entry.raw_text)
             process_email_sent(lead, entry, stats)
           end
           
-          # Process email opened events (type 37 - alert opens)
-          if entry.type_code == 37 # Alert email opened
+          # Process email opened events
+          # Type 5: Manual email opened
+          # Type 37: Alert email opened  
+          # Type 131: Auto email opened
+          if [5, 37, 131].include?(entry.type_code) && entry.raw_text&.match?(/opened (alert )?email/i)
             process_email_opened(lead, entry, stats)
           end
         end
@@ -59,6 +65,9 @@ module Lofty
           templateName: template_name,
           rawText: entry.raw_text
         }
+        
+        # Classify email category (prefer Lofty emailType, then subject patterns)
+        email_category = Lofty::EmailCategoryClassifier.classify(email_subject, email_type)
 
         event = Event.find_or_initialize_by(lofty_timeline_id: entry.event_id)
 
@@ -71,7 +80,8 @@ module Lofty
             event_type: :email_sent,
             occurred_at: occurred_at,
             raw_text: entry.raw_text,
-            metadata: metadata
+            metadata: metadata,
+            email_category: email_category
           )
           event.save!
           stats[:email_sent] += 1

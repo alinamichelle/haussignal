@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2025_11_18_030204) do
+ActiveRecord::Schema[7.1].define(version: 2025_11_20_005543) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -39,6 +39,7 @@ ActiveRecord::Schema[7.1].define(version: 2025_11_18_030204) do
     t.uuid "agent_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "email_category"
     t.index ["agent_id"], name: "index_events_on_agent_id"
     t.index ["event_type"], name: "index_events_on_event_type"
     t.index ["lead_id"], name: "index_events_on_lead_id"
@@ -63,6 +64,11 @@ ActiveRecord::Schema[7.1].define(version: 2025_11_18_030204) do
     t.datetime "last_synced_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "pipeline"
+    t.string "segment"
+    t.datetime "reg_date"
+    t.string "lead_type"
+    t.text "notes"
     t.index ["agent_id"], name: "index_leads_on_agent_id"
     t.index ["lofty_lead_id"], name: "index_leads_on_lofty_lead_id", unique: true
   end

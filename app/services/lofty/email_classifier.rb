@@ -1,11 +1,16 @@
 module Lofty
   class EmailClassifier
     # Type code mappings based on Lofty's timeline system
-    # Note: Type 124 appears to be email events (both sent and opened)
-    # Type 37 appears to be alert email opens
-    # Type 126 is SMS/text messages (not emails)
-    EMAIL_SENT_CODES = [103, 105, 124, 127, 128].freeze
-    EMAIL_OPENED_CODES = [37, 124].freeze
+    # Type 6 = Manual email sent (primary)
+    # Type 103 = MIXED! Can be email sends OR tasks - must check text
+    # Type 124 = MIXED! Can be email sends OR tasks - must check text  
+    # Type 128 = Auto email sent
+    # Type 105 = Task completion (NOT email)
+    # Type 37 = Alert email opens
+    # Type 126 = SMS/text messages (not emails)
+    # Type 127 = SMS/text messages (not emails)
+    EMAIL_SENT_CODES = [6, 103, 124, 128].freeze
+    EMAIL_OPENED_CODES = [37].freeze
     SMS_CODES = [126].freeze
     
     # Email type badges/labels commonly used in Lofty
@@ -69,12 +74,27 @@ module Lofty
       classify_from_type_code(entry.type_code)
     end
     
-    def self.is_email_sent?(type_code)
+    def self.is_email_sent?(type_code, raw_text = nil)
+      # Type 103 and 124 are MIXED - check text to distinguish emails from tasks
+      if [103, 124].include?(type_code)
+        # It's a task if text says "Task: ... was created" or "Task was created"
+        return false if raw_text&.match?(/task.*was created/i)
+        # It's an email if text has [Auto E-Mail] or [Manual E-Mail] header
+        return true if raw_text&.match?(/\[(Auto|Manual) E-Mail\]/i)
+        # Otherwise unclear, default to false to be safe
+        return false
+      end
+      
+      # Other codes are straightforward
       EMAIL_SENT_CODES.include?(type_code)
     end
     
     def self.is_email_opened?(type_code)
       EMAIL_OPENED_CODES.include?(type_code)
+    end
+    
+    def self.is_task?(raw_text)
+      raw_text&.match?(/task was created/i)
     end
     
     def self.extract_email_subject(entry)
@@ -233,9 +253,9 @@ module Lofty
       return reply_line.strip if reply_line
       
       # Special handling for Lofty's email format:
-      # Line 1: "[Auto E-Mail] Name to Name:"
+      # Line 1: "[Auto E-Mail] Name to Name:" or "[Manual E-Mail] Name to Name:"
       # Line 2: Actual subject
-      if lines.length >= 2 && lines[0].match?(/\[Auto E-Mail\].*:/i)
+      if lines.length >= 2 && lines[0].match?(/\[(Auto|Manual) E-Mail\].*:/i)
         # The real subject is on the second line
         return lines[1] if lines[1].length > 5
       end

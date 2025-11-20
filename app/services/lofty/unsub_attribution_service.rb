@@ -30,7 +30,7 @@ module Lofty
     def find_eligible_emails(all_entries, unsub_time)
       eligible = all_entries.select do |entry|
         # Must be an email sent event
-        is_email = @classifier.is_email_sent?(entry.type_code)
+        is_email = @classifier.is_email_sent?(entry.type_code, entry.raw_text)
         next false unless is_email
         
         # Must occur before unsub

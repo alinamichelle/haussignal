@@ -1,0 +1,64 @@
+<h1>Timeline Debug for <%= @lead.full_name.presence || @lead.lofty_lead_id %></h1>
+
+<p>
+  Lofty URL:
+  <a href="https://crm.lofty.com/admin/home/detail?leadId=<%= @lead.lofty_lead_id %>" target="_blank" style="color: #1890ff;">
+    open in Lofty
+  </a>
+</p>
+
+<p>
+  <strong>Lead ID:</strong> <%= @lead.lofty_lead_id %> |
+  <strong>Pipeline:</strong> <%= @lead.pipeline %> |
+  <strong>Source:</strong> <%= @lead.source %> |
+  <strong>Reg Date:</strong> <%= @lead.reg_date&.strftime('%Y-%m-%d') %>
+</p>
+
+<p>
+  <strong>Unsubs:</strong> <%= @unsubs.size %> |
+  <strong>Emails Sent:</strong> <%= @email_sents.size %> |
+  <strong>Emails Opened:</strong> <%= @email_opens.size %>
+</p>
+
+<hr>
+
+<p><%= link_to "← Back to leads", debug_leads_path, style: "color: #1890ff;" %></p>
+
+<h2>Events Timeline (oldest → newest)</h2>
+
+<ul style="list-style:none; padding-left:0;">
+  <% @events.each do |e| %>
+    <% klass =
+      case e.event_type.to_s
+      when "unsub"        then "background:#ffe5e5;border-left:4px solid #ff4d4f;"
+      when "email_sent"   then "background:#e6f7ff;border-left:4px solid #1890ff;"
+      when "email_opened" then "background:#f6ffed;border-left:4px solid #52c41a;"
+      else "background:#fafafa;border-left:4px solid #d9d9d9;"
+      end
+    %>
+
+    <li style="margin-bottom:10px; padding:8px; <%= klass %>">
+      <div style="font-size:12px; color:#666;">
+        <strong><%= e.occurred_at.strftime('%Y-%m-%d %H:%M:%S UTC') %></strong>
+        · type_code=<%= e.type_code %>
+        · event_type=<strong><%= e.event_type %></strong>
+      </div>
+
+      <pre style="white-space:pre-wrap;margin:4px 0;font-size:13px;font-family:monospace;"><%= e.raw_text %></pre>
+
+      <% if e.event_type.to_s == "unsub" %>
+        <% trigger = e.metadata["triggerEmail"] || {} %>
+        <% categories = (e.metadata["unsubCategories"] || []).join(", ") %>
+
+        <div style="font-size:12px; color:#333; margin-top:4px; padding:6px; background:#fff; border:1px solid #ddd;">
+          <strong>📌 Unsub Metadata:</strong><br>
+          <strong>Categories:</strong> <%= categories.presence || "—" %><br>
+          <strong>Trigger Email Type:</strong> <%= trigger["emailType"] || "—" %><br>
+          <strong>Trigger Subject:</strong> <%= trigger["emailSubject"] || trigger["subject"] || "—" %><br>
+          <strong>Sent At:</strong> <%= trigger["sentAt"] || "—" %><br>
+          <strong>Open Status:</strong> <%= trigger["openStatus"] || "—" %>
+        </div>
+      <% end %>
+    </li>
+  <% end %>
+</ul>

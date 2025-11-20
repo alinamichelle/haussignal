@@ -7,4 +7,9 @@ Rails.application.routes.draw do
 
   # Defines the root path route ("/")
   # root "posts#index"
+  
+  # Debug UI for inspecting events
+  namespace :debug do
+    resources :leads, only: [:index, :show]
+  end
 end

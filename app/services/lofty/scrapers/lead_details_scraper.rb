@@ -63,6 +63,21 @@ module Lofty
           browser.close
         end
 
+        # Persist to Lead model
+        lead = Lead.find_or_create_by!(
+          org_id: ENV.fetch("ORG_ID", "realty-haus"),
+          lofty_lead_id: lofty_lead_id
+        )
+
+        lead.update!(
+          pipeline: details[:pipeline],
+          segment: details[:segment],
+          source: details[:referral_source],
+          reg_date: parse_reg_date(details[:reg_date])
+        )
+
+        Rails.logger.info "✅ Persisted lead details for #{lofty_lead_id}: pipeline=#{details[:pipeline]}, segment=#{details[:segment]}, source=#{details[:referral_source]}, reg_date=#{details[:reg_date]}"
+
         details
       end
 
@@ -129,6 +144,13 @@ module Lofty
       def extract_reg_date(page)
         # Handle "Reg Date", "Reg date", "Registration Date", etc.
         detail_value_by_label(page, ['Reg Date', 'Reg date', 'Registration Date', 'Reg. Date'])
+      end
+      
+      def parse_reg_date(date_string)
+        return nil if date_string.blank?
+        
+        # Parse Lofty date format: "Oct 8, 2025"
+        Date.parse(date_string) rescue nil
       end
 
       def extract_family_members(page)

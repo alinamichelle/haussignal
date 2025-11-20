@@ -4,6 +4,7 @@ class Event < ApplicationRecord
 
   enum event_type: {
     unsub: 'unsub',
+    manual_unsub: 'manual_unsub',
     email_sent: 'email_sent',
     email_opened: 'email_opened',
     call: 'call',

@@ -38,6 +38,9 @@ gem "bootsnap", require: false
 # Playwright for browser automation
 gem "playwright-ruby-client"
 
+# Parallel processing
+gem "parallel"
+
 # Sidekiq for background jobs
 gem "sidekiq"
 gem "sidekiq-cron"

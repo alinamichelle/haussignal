@@ -1,4 +1,5 @@
 timeline_item: ".timeline-item"
+timeline_container: ".timeline-load-wrap"
 timeline_id_attr: "data-timeline-id"
 timeline_type_attr: "data-timeline-type"
 timestamp: ".timeline-time .time"

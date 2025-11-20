@@ -164,6 +164,7 @@ GEM
       racc (~> 1.4)
     nokogiri (1.18.10-x86_64-linux-musl)
       racc (~> 1.4)
+    parallel (1.27.0)
     pg (1.6.2)
     pg (1.6.2-aarch64-linux)
     pg (1.6.2-aarch64-linux-musl)
@@ -275,6 +276,7 @@ DEPENDENCIES
   bootsnap
   debug
   dotenv-rails
+  parallel
   pg (~> 1.1)
   playwright-ruby-client
   puma (>= 5.0)

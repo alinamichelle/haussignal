@@ -200,16 +200,84 @@ module Lofty
       end
 
       private
-
-      def auto_scroll(page)
-        Rails.logger.info "📜 Auto-scrolling to load all timeline items..."
+      
+      # =========================================
+      # FULL TIMELINE LOADER FOR LOFTY
+      # - Scrolls the timeline container
+      # - Scrolls the page body
+      # - Clicks "Click to view..." button if present
+      # - Stops when item count stops increasing
+      # =========================================
+      
+      ITEM_SELECTOR = '.timeline-item'
+      
+      def load_full_email_timeline(page)
+        puts "🧵 Starting full timeline load..."
         
-        20.times do
-          page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
-          page.wait_for_timeout(1000)
+        # 1) Make sure the container exists
+        page.wait_for_selector('.timeline-load-wrap', timeout: 15_000)
+        container = page.locator('.timeline-load-wrap')
+        puts "✅ Timeline container found"
+        page.wait_for_timeout(2000)
+        
+        items = page.locator(ITEM_SELECTOR)
+        
+        last_count = 0
+        stable_iterations = 0
+        max_stable = 15  # "no new items" loops before we give up
+        
+        1.upto(200) do |i|
+          count = items.count
+          
+          if count > last_count
+            puts "   [#{i}] 📥 +#{count - last_count} new items (total: #{count})"
+            last_count = count
+            stable_iterations = 0
+          else
+            stable_iterations += 1
+            puts "   [#{i}] stable #{stable_iterations}/#{max_stable}, items=#{count}" if i % 5 == 0
+          end
+          
+          # Stop once we've been stable for a while
+          break if stable_iterations >= max_stable
+          
+          # 2) Scroll: move the LAST item into view – this is the key
+          if count > 0
+            items.nth(count - 1).scroll_into_view_if_needed
+          else
+            container.scroll_into_view_if_needed
+          end
+          
+          page.wait_for_timeout(600)
+          
+          # 3) If the load-more button is actually visible, click it
+          begin
+            btn = page.locator('.new-timeline-bottom-btn, .timeline-bottom-btn')
+            if btn.count > 0 && btn.first.visible?
+              puts "   🔽 Clicked load-more button..."
+              btn.first.click
+              page.wait_for_timeout(2000)
+              stable_iterations = 0
+            end
+          rescue => e
+            puts "   ⚠️  Button click error: #{e.message}"
+          end
         end
         
-        Rails.logger.info "✅ Scrolling complete"
+        final = items.count
+        visible = page.evaluate(<<~JS)
+          (() => {
+            return Array.from(document.querySelectorAll('.timeline-item')).filter(el => el.offsetParent !== null).length;
+          })();
+        JS
+        
+        puts "🎉 Final timeline item count: #{final}"
+        puts "🔍 Debug: DOM items=#{final}, visible=#{visible}"
+      end
+      
+      # Legacy method - calls new system
+      def auto_scroll(page)
+        load_full_email_timeline(page)
       end
     end
   end
