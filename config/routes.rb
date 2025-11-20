@@ -12,4 +12,15 @@ Rails.application.routes.draw do
   namespace :debug do
     resources :leads, only: [:index, :show]
   end
+
+  # API v1 - Unsubscribe Intelligence Dashboard
+  namespace :api do
+    namespace :v1 do
+      get 'unsubs/summary',        to: 'unsubs#summary'
+      get 'unsubs/series',         to: 'unsubs#series'
+      get 'unsubs/campaigns',      to: 'unsubs#campaigns'
+      get 'unsubs/campaigns/:id',  to: 'unsubs#campaign'
+      get 'leads/:id/unsub_details', to: 'leads#unsub_details'
+    end
+  end
 end
