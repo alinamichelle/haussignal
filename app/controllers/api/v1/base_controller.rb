@@ -11,7 +11,13 @@ module Api
         when '30d' then 30.days.ago..Time.current
         when '90d' then 90.days.ago..Time.current
         when '12m' then 12.months.ago..Time.current
+        when 'ytd' then Time.current.beginning_of_year..Time.current
         when 'all' then Time.at(0)..Time.current
+        when 'custom'
+          # Custom date range from start_date and end_date params
+          start_date = params[:start_date].present? ? Time.zone.parse(params[:start_date]).beginning_of_day : 30.days.ago
+          end_date = params[:end_date].present? ? Time.zone.parse(params[:end_date]).end_of_day : Time.current
+          start_date..end_date
         else 30.days.ago..Time.current # default to 30d
         end
       end

@@ -16,11 +16,14 @@ Rails.application.routes.draw do
   # API v1 - Unsubscribe Intelligence Dashboard
   namespace :api do
     namespace :v1 do
-      get 'unsubs/summary',        to: 'unsubs#summary'
-      get 'unsubs/series',         to: 'unsubs#series'
-      get 'unsubs/campaigns',      to: 'unsubs#campaigns'
-      get 'unsubs/campaigns/:id',  to: 'unsubs#campaign'
+      get 'unsubs/summary', to: 'unsubs#summary'
+      get 'unsubs/series', to: 'unsubs#series'
+      get 'unsubs/campaigns', to: 'unsubs#campaigns'
+      get 'unsubs/campaigns/:id', to: 'unsubs#campaign'
+      get 'unsubs/leads', to: 'unsubs#leads'
+      get 'unsubs/analytics', to: 'unsubs#analytics'
       get 'leads/:id/unsub_details', to: 'leads#unsub_details'
+      get 'leads/:id/profile', to: 'leads#profile'
     end
   end
 end

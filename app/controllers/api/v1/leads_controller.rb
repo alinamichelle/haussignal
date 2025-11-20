@@ -1,6 +1,154 @@
 module Api
   module V1
     class LeadsController < BaseController
+      # GET /api/v1/leads/:id/profile
+      # Returns complete lead profile with all events and stats
+      def profile
+        lead = Lead.includes(:events, :agent).find(params[:id])
+        events = lead.events.order(occurred_at: :desc)
+
+        # Separate events by type
+        email_sent_events = events.select { |e| e.event_type == 'email_sent' }
+        email_opened_events = events.select { |e| e.event_type == 'email_opened' }
+        unsub_events = events.select { |e| e.event_type.in?(%w[unsub manual_unsub]) }
+
+        # Group email_opened events by subject to link them to email_sent
+        opened_events = events.select { |e| e.event_type == 'email_opened' }
+        opened_by_subject = {}
+        
+        opened_events.each do |event|
+          # Extract subject from rawText
+          raw_text = event.metadata['rawText']
+          subject = nil
+          if raw_text.present?
+            lines = raw_text.split("\n")
+            subject = lines[1] if lines.length > 1
+          end
+          subject ||= event.metadata['emailSubject']
+          
+          if subject.present?
+            opened_by_subject[subject] ||= []
+            opened_by_subject[subject] << event.occurred_at
+          end
+        end
+
+        # Group unsub events by occurred_at timestamp (same unsub batch)
+        unsub_events = events.select { |e| e.event_type.in?(%w[unsub manual_unsub]) }
+        grouped_unsubs = unsub_events.group_by { |e| e.occurred_at.to_s }
+        processed_unsub_times = Set.new
+
+        # Build timeline, excluding standalone email_opened events and duplicate unsubs
+        timeline = events.reject { |e| e.event_type == 'email_opened' }.filter_map do |event|
+          # For unsub events, only process the first one in each timestamp group
+          if event.event_type.in?(%w[unsub manual_unsub])
+            time_key = event.occurred_at.to_s
+            if processed_unsub_times.include?(time_key)
+              next nil # Skip duplicate unsubs at same time
+            end
+            processed_unsub_times.add(time_key)
+            
+            # Get all unsubs at this timestamp
+            same_time_unsubs = grouped_unsubs[time_key] || [event]
+            
+            # Collect all categories they unsubscribed from
+            unsub_categories = same_time_unsubs.map { |e| e.metadata['unsubCategory'] }.compact.uniq
+            
+            subject = event.metadata.dig('triggerEmail', 'emailSubject')
+            email_type = event.metadata.dig('triggerEmail', 'emailType')
+            category = Lofty::EmailCategoryClassifier.classify(subject, email_type)
+            
+            {
+              id: event.id,
+              type: event.event_type,
+              occurredAt: event.occurred_at,
+              category: category,
+              categoryDisplay: category ? Lofty::EmailCategoryClassifier.category_name(category) : nil,
+              opened: false,
+              openedAt: [],
+              unsubDetails: {
+                count: same_time_unsubs.count,
+                categories: unsub_categories
+              },
+              metadata: {
+                subject: subject,
+                emailType: email_type,
+                campaignId: event.metadata['campaign_id'],
+                unsubCategory: event.metadata['unsubCategory']
+              }
+            }
+          else
+            subject = event.metadata['emailSubject']
+            email_type = event.metadata['emailType']
+            category = Lofty::EmailCategoryClassifier.classify(subject, email_type)
+            
+            # Find all opens for this email
+            opens = opened_by_subject[subject] || []
+            
+            {
+              id: event.id,
+              type: event.event_type,
+              occurredAt: event.occurred_at,
+              category: category,
+              categoryDisplay: category ? Lofty::EmailCategoryClassifier.category_name(category) : nil,
+              opened: opens.any?,
+              openedAt: opens,
+              unsubDetails: nil,
+              metadata: {
+                subject: subject,
+                emailType: email_type,
+                campaignId: event.metadata['campaign_id'],
+                unsubCategory: nil
+              }
+            }
+          end
+        end
+
+        # Group emails sent by category
+        emails_by_category = email_sent_events.group_by do |e|
+          subject = e.metadata['emailSubject']
+          email_type = e.metadata['emailType']
+          Lofty::EmailCategoryClassifier.classify(subject, email_type) || 'uncategorized'
+        end.transform_values(&:count)
+
+        category_breakdown = emails_by_category.map do |cat, count|
+          {
+            category: cat,
+            displayName: Lofty::EmailCategoryClassifier.category_name(cat),
+            count: count
+          }
+        end.sort_by { |c| -c[:count] }
+
+        # Calculate stats
+        total_sent = email_sent_events.count
+        total_opened = email_opened_events.count
+        open_rate = total_sent.zero? ? 0 : (total_opened.to_f / total_sent).round(4)
+        days_active = lead.reg_date ? (Time.current.to_date - lead.reg_date.to_date).to_i : nil
+
+        render json: {
+          lead: {
+            id: lead.id,
+            name: lead.full_name || [lead.first_name, lead.last_name].compact.join(' '),
+            email: lead.email,
+            phone: lead.phone,
+            source: lead.source,
+            pipeline: lead.pipeline,
+            segment: lead.segment,
+            leadType: lead.lead_type,
+            regDate: lead.reg_date,
+            agentName: lead.agent&.name,
+            loftyLeadId: lead.lofty_lead_id
+          },
+          stats: {
+            totalEmailsSent: total_sent,
+            totalEmailsOpened: total_opened,
+            openRate: open_rate,
+            totalUnsubs: unsub_events.count,
+            daysActive: days_active,
+            categoryBreakdown: category_breakdown
+          },
+          timeline: timeline
+        }
+      end
       UNSUB_EVENT_TYPES  = %w[unsub manual_unsub].freeze
       EMAIL_SENT_TYPES   = %w[email_sent].freeze
       EMAIL_OPENED_TYPES = %w[email_opened].freeze
