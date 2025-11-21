@@ -5,6 +5,7 @@ module Lofty
     TYPE_CODE_MAPPINGS = {
       5 => :email_opened,      # Manual email opened
       6 => :email_sent,        # Manual email sent
+      25 => :call,             # Call activity (agent called lead)
       37 => :email_opened,     # Alert email opened
       111 => :manual_unsub,    # Manual unsubscribe (agent action)
       113 => :unsub,           # Automatic unsubscribe (lead action)
@@ -64,7 +65,10 @@ module Lofty
     # =====================================================
 
     def call?
-      @raw_text.match?(/\b(call|rang|phone|dialed|spoke|voicemail|answered)\b/i) ||
+      # Check type code first
+      return true if @entry.type_code == 25
+      
+      @raw_text.match?(/\b(called|call|rang|phone|dialed|spoke|voicemail|answered)\b/i) ||
         @css_classes.any? { |c| c.match?(/call/i) } ||
         @html_content.match?(/icon.*phone|call.*icon/i)
     end
@@ -405,8 +409,9 @@ module Lofty
 
     # Call-specific extractors
     def extract_call_direction
-      return "inbound" if @raw_text.match?(/rang|received|incoming/i)
-      return "outbound" if @raw_text.match?(/called|dialed|outgoing/i)
+      return "inbound" if @raw_text.match?(/rang|received|incoming|lead called/i)
+      return "outbound" if @raw_text.match?(/agent called|called lead|dialed|outgoing/i)
+      return "outbound" if @raw_text.match?(/^[A-Z][a-z]+ [A-Z][a-z]+ called/i)  # "Matt Cordova called"
       "unknown"
     end
 
@@ -430,7 +435,7 @@ module Lofty
     end
 
     def extract_call_result
-      return "answered" if @raw_text.match?(/answered|spoke/i)
+      return "answered" if @raw_text.match?(/answered|spoke|talked/i)
       return "voicemail" if @raw_text.match?(/voicemail|left.*message/i)
       return "no_answer" if @raw_text.match?(/no.*answer|unanswered/i)
       return "busy" if @raw_text.match?(/busy/i)
@@ -454,6 +459,11 @@ module Lofty
 
     def extract_caller_number
       # Extract caller's phone number from text or data attributes
+      # Pattern: "called Lead (+1 5125791357)"
+      if @raw_text =~ /\(\+?1?\s*(\d{3})[-.\s]?(\d{3})[-.\s]?(\d{4})\)/
+        return "#{$1}-#{$2}-#{$3}"
+      end
+      
       if @raw_text =~ /from\s+(\+?1?\s*\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i
         return normalize_phone_number($1)
       end
