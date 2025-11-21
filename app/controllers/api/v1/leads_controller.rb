@@ -69,14 +69,9 @@ module Api
                 count: same_time_unsubs.count,
                 categories: unsub_categories
               },
-              metadata: {
-                subject: subject,
-                emailType: email_type,
-                campaignId: event.metadata['campaign_id'],
-                unsubCategory: event.metadata['unsubCategory']
-              }
+              metadata: build_event_metadata(event)
             }
-          else
+          elsif event.event_type == 'email_sent'
             subject = event.metadata['emailSubject']
             email_type = event.metadata['emailType']
             category = Lofty::EmailCategoryClassifier.classify(subject, email_type)
@@ -93,12 +88,24 @@ module Api
               opened: opens.any?,
               openedAt: opens,
               unsubDetails: nil,
-              metadata: {
-                subject: subject,
-                emailType: email_type,
-                campaignId: event.metadata['campaign_id'],
-                unsubCategory: nil
-              }
+              metadata: build_event_metadata(event)
+            }
+          else
+            # ALL OTHER EVENT TYPES: calls, SMS, notes, pipeline changes, smartplans, etc.
+            {
+              id: event.id,
+              type: event.event_type,
+              occurredAt: event.occurred_at,
+              category: nil,
+              categoryDisplay: nil,
+              opened: false,
+              openedAt: [],
+              unsubDetails: nil,
+              fromPipeline: event.from_pipeline,
+              toPipeline: event.to_pipeline,
+              recordingAvailable: event.recording_available,
+              metadata: build_event_metadata(event),
+              rawText: event.raw_text
             }
           end
         end
@@ -209,6 +216,68 @@ module Api
       end
 
       private
+
+      def build_event_metadata(event)
+        base = {
+          subject: event.metadata['emailSubject'],
+          emailType: event.metadata['emailType'],
+          campaignId: event.metadata['campaign_id'],
+          unsubCategory: event.metadata['unsubCategory']
+        }
+        
+        # Add call-specific metadata
+        if event.event_type == 'call'
+          base.merge!({
+            call_direction: event.metadata['call_direction'],
+            call_duration_seconds: event.metadata['call_duration_seconds'],
+            call_result: event.metadata['call_result'],
+            call_status: event.metadata['call_status'],
+            caller_number: event.metadata['caller_number'],
+            call_notes: event.metadata['call_notes'],
+            lofty_recording_url: event.metadata['lofty_recording_url']
+          })
+        end
+        
+        # Add SMS-specific metadata
+        if event.event_type == 'sms'
+          base.merge!({
+            sms_direction: event.metadata['sms_direction'],
+            sms_body: event.metadata['sms_body'],
+            virtual_number: event.metadata['virtual_number'],
+            delivery_status: event.metadata['delivery_status']
+          })
+        end
+        
+        # Add pipeline change metadata
+        if event.metadata['activity_type'] == 'pipeline_change'
+          base.merge!({
+            from: event.metadata['from'],
+            to: event.metadata['to'],
+            actor: event.metadata['actor']
+          })
+        end
+        
+        # Add smartplan metadata
+        if event.event_type == 'smartplan'
+          base.merge!({
+            smartplan_name: event.metadata['smartplan_name'],
+            smartplan_step_name: event.metadata['smartplan_step_name'],
+            smartplan_step_type: event.metadata['smartplan_step_type']
+          })
+        end
+        
+        # Add task/note metadata
+        if event.event_type == 'note'
+          base.merge!({
+            task_title: event.metadata['task_title'],
+            task_status: event.metadata['task_status'],
+            note_content: event.metadata['note_content'],
+            note_author: event.metadata['note_author']
+          })
+        end
+        
+        base
+      end
 
       def build_lead_payload(lead)
         {
