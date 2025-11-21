@@ -123,82 +123,12 @@ module Lofty
           url = "#{ENV['LOFTY_BASE_URL']}/admin/home/detail?leadId=#{lofty_lead_id}"
           Rails.logger.info "🔵 Fetching timeline via API: #{lofty_lead_id}"
           
-          # Intercept Lofty's own timeline API calls (piggyback on their auth/headers)
-          Rails.logger.info "🌐 Intercepting Lofty timeline API responses..."
+          # Fetch all timeline data using Lofty's API with pagination
+          Rails.logger.info "🌐 Fetching timeline via API with pagination..."
           
-          all_timelines = []
-          captured_responses = []
+          all_timelines = fetch_all_timeline_json(page, lofty_lead_id, url)
           
-          # Set up response listener before navigation
-          page.on('response', ->(response) do
-            if response.request.method == 'GET' &&
-               response.url.include?('/api/lead-timeline-server/timeline/lead/all/filtered') &&
-               response.url.include?("leadId=#{lofty_lead_id}")
-              captured_responses << response
-            end
-          end)
-          
-          page.goto(url, waitUntil: 'networkidle')
-          page.wait_for_timeout(3000)
-          
-          # Process captured responses
-          captured_responses.each_with_index do |response, idx|
-            begin
-              json = JSON.parse(response.body)
-              data = json['data'] || {}
-              timelines = data['timeLines'] || []
-              
-              Rails.logger.info "📊 Response #{idx + 1}: #{timelines.length} timeline items"
-              all_timelines.concat(timelines)
-            rescue => e
-              Rails.logger.warn "⚠️ Error parsing response #{idx + 1}: #{e.message}"
-            end
-          end
-          
-          # Check if we need more pages by looking at the last response
-          if captured_responses.any?
-            last_response = captured_responses.last
-            json = JSON.parse(last_response.body)
-            data = json['data'] || {}
-            has_more = data['hasMore'].to_i == 1
-            total_count = data['totalCount'] || '?'
-            puts "   Page 1 complete: #{all_timelines.length} items, hasMore=#{has_more}, totalCount=#{total_count}"
-            page_num = 1
-            
-            # Trigger additional pages if needed
-            while has_more && page_num < 50
-              captured_responses.clear
-              puts "   Triggering page #{page_num + 1}..."
-              
-              # Scroll timeline container to bottom to trigger lazy load
-              page.evaluate(<<~JS)
-                const container = document.querySelector('.new-time-line-list');
-                if (container) {
-                  container.scrollTop = container.scrollHeight;
-                }
-              JS
-              
-              page.wait_for_timeout(3000)  # Wait longer for API call
-              
-              # Process any new responses
-              if captured_responses.any?
-                response = captured_responses.last
-                json = JSON.parse(response.body)
-                data = json['data'] || {}
-                timelines = data['timeLines'] || []
-                has_more = data['hasMore'].to_i == 1
-                
-                puts "   Page #{page_num + 1}: #{timelines.length} items (hasMore: #{has_more})"
-                all_timelines.concat(timelines)
-                page_num += 1
-              else
-                puts "   No more responses captured, stopping pagination"
-                break
-              end
-            end
-          end
-          
-          Rails.logger.info "✅ Total timeline items collected: #{all_timelines.length}"
+          puts "   ✅ Total timeline items collected: #{all_timelines.length}"
 
           all_timelines.each do |item|
             entries << RawTimelineEntry.new(
@@ -219,6 +149,75 @@ module Lofty
         end
 
         entries
+      end
+      
+      # Fetch all timeline JSON with proper pagination
+      def fetch_all_timeline_json(page, lead_id, url)
+        results = []
+        page_num = 0
+        captured_responses = []
+        
+        # Set up response listener BEFORE navigation
+        page.on('response', ->(response) do
+          if response.request.method == 'GET' &&
+             response.url.include?('/lead-timeline-server/timeline/lead/all/filtered') &&
+             response.url.include?("leadId=#{lead_id}")
+            captured_responses << response
+          end
+        end)
+        
+        # Navigate to page (this triggers first API call)
+        page.goto(url, waitUntil: 'networkidle')
+        page.wait_for_timeout(2000)
+        
+        # Process first page
+        if captured_responses.any?
+          response = captured_responses.first
+          json = JSON.parse(response.body)
+          data = json['data'] || {}
+          timelines = data['timeLines'] || []
+          has_more = data['hasMore'].to_i == 1
+          
+          puts "   Page 0: #{timelines.length} items (hasMore: #{has_more})"
+          results.concat(timelines)
+          page_num = 1
+          
+          # Paginate if needed
+          while has_more && page_num < 50
+            captured_responses.clear
+            
+            # Scroll multiple times to trigger lazy load
+            3.times do
+              page.evaluate <<~JS
+                const el = document.querySelector('.new-time-line-list');
+                if (el) {
+                  el.scrollTop = el.scrollHeight;
+                  el.scrollBy(0, 1000);
+                }
+              JS
+              page.wait_for_timeout(500)
+            end
+            
+            page.wait_for_timeout(3000)  # Wait longer for API
+            
+            if captured_responses.any?
+              response = captured_responses.last
+              json = JSON.parse(response.body)
+              data = json['data'] || {}
+              timelines = data['timeLines'] || []
+              has_more = data['hasMore'].to_i == 1
+              
+              puts "   Page #{page_num}: #{timelines.length} items (hasMore: #{has_more})"
+              results.concat(timelines)
+              page_num += 1
+            else
+              puts "   No response for page #{page_num}, stopping"
+              break
+            end
+          end
+        end
+
+        results
       end
 
       private
