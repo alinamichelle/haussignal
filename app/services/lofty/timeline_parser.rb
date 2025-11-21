@@ -321,6 +321,8 @@ module Lofty
         agent_id: extract_agent_id,
         metadata: {
           "smartplan_name" => extract_smartplan_name,
+          "smartplan_action" => extract_smartplan_action,
+          "smartplan_actor" => extract_smartplan_actor,
           "smartplan_step_name" => extract_smartplan_step_name,
           "smartplan_step_type" => extract_smartplan_step_type,
           "smartplan_trigger" => extract_smartplan_trigger,
@@ -648,6 +650,28 @@ module Lofty
     end
 
     # Smartplan-specific extractors
+    def extract_smartplan_action
+      # Extract action: applied, deleted, paused, resumed, completed, etc.
+      return "applied" if @raw_text.match?(/applied\s+smart\s*plan/i)
+      return "deleted" if @raw_text.match?(/deleted\s+smart\s*plan/i)
+      return "paused" if @raw_text.match?(/paused\s+smart\s*plan/i)
+      return "resumed" if @raw_text.match?(/resumed\s+smart\s*plan/i)
+      return "completed" if @raw_text.match?(/completed\s+smart\s*plan/i)
+      return "started" if @raw_text.match?(/started\s+smart\s*plan/i)
+      "unknown"
+    end
+    
+    def extract_smartplan_actor
+      # Extract who performed the action
+      # Pattern: "Agent Name applied Smart Plan"
+      if @raw_text =~ /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:\s+[A-Z][a-z]+)?)\s+(?:applied|deleted|paused|resumed|completed|started)/i
+        return $1.strip
+      end
+      
+      # Fallback to generic agent extraction
+      extract_agent_name_from_text
+    end
+    
     def extract_smartplan_name
       # Try to extract smart plan name from text
       if @raw_text =~ /smart\s*plan[:\s]+([^,\n]+)/i

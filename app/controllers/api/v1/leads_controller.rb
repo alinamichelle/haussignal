@@ -261,6 +261,8 @@ module Api
         if event.event_type == 'smartplan'
           base.merge!({
             smartplan_name: event.metadata['smartplan_name'],
+            smartplan_action: event.metadata['smartplan_action'],
+            smartplan_actor: event.metadata['smartplan_actor'],
             smartplan_step_name: event.metadata['smartplan_step_name'],
             smartplan_step_type: event.metadata['smartplan_step_type']
           })
