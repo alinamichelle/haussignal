@@ -5,17 +5,20 @@ module Lofty
     # Type code mappings based on observed Lofty timeline patterns
     # These map Lofty's internal type codes to our event_type enum
     TYPE_CODE_MAPPINGS = {
+      2 => :task,              # Task edited
       5 => :email_opened,      # Manual email opened
       6 => :email_sent,        # Manual email sent
       8 => :call,              # Call activity (lead called agent)
       16 => :note,             # Manual note added
+      21 => :note,             # Profile edited
       25 => :call,             # Call activity (agent called lead)
       37 => :email_opened,     # Alert email opened
       38 => :other,            # Pipeline change (will be detected by pipeline_change?)
       93 => :note,             # Lead details updated (system)
       98 => :note,             # Transaction assigned
       103 => :email_sent,      # MIXED: Can be email OR task - requires text check
-      104 => :task,            # Task completed
+      104 => :task,            # Task completed (manually)
+      105 => :task,            # Task completed (automated by smart plan)
       111 => :manual_unsub,    # Manual unsubscribe (agent action)
       113 => :unsub,           # Automatic unsubscribe (lead action)
       116 => :note,            # Transaction created
@@ -24,7 +27,6 @@ module Lofty
       128 => :email_sent,      # Auto email sent
       131 => :email_opened,    # Auto email opened
       169 => :note,            # Lead reassignment
-      21 => :note,             # Profile edited
       
       # Additional type codes will be discovered and mapped as we scrape
       # Unknown codes default to :other
@@ -61,15 +63,15 @@ module Lofty
       return nil if task_creation?(@raw_text)
 
       # Detect activity type and parse accordingly
-      # IMPORTANT: task? must come before call? because type 104 contains "(Call)" text
+      # IMPORTANT: Check emails BEFORE tasks to avoid misclassification
       case
-      when task?          then parse_task
-      when call?          then parse_call
-      when sms?           then parse_sms
       when email_sent?    then parse_email_sent
       when email_opened?  then parse_email_opened
       when unsub?         then parse_unsub
       when manual_unsub?  then parse_manual_unsub
+      when task?          then parse_task
+      when call?          then parse_call
+      when sms?           then parse_sms
       when note?          then parse_note
       when smartplan?     then parse_smartplan
       when pipeline_change? then parse_pipeline_change
@@ -91,20 +93,39 @@ module Lofty
         content = @raw_json['content'] || {}
         international = @raw_json['international'] || {}
         
+        # Extract full text body first (needed for type detection)
+        raw_text = extract_json_body(type_code, content, international)
+      
+        # Skip task creation events
+        return nil if raw_text&.match?(/task.*was created/i)
+        
         # Extract event type from type code
         event_type = TYPE_CODE_MAPPINGS[type_code] || :other
         
-        # Extract full text body based on event type
-        raw_text = extract_json_body(type_code, content, international)
-      
-      # Skip task creation events
-      return nil if raw_text&.match?(/task.*was created/i)
+        # Special handling for type 103 (mixed email/task)
+        # Check if it's an email first (has email indicators), otherwise check if it's a task
+        if type_code == 103 && raw_text.present?
+          # If it has email indicators, it's an email (even if it contains task-like words)
+          is_email = raw_text.match?(/\[(Auto|Manual) E-Mail\]/i) ||
+                     content['subject'].present? ||
+                     raw_text.match?(/sent email to|opened email/i)
+          
+          # Only check for task patterns if it's NOT an email
+          unless is_email
+            is_task = raw_text.match?(/^(If they|•|\*|\-|Call|Text|Tag)/i) ||
+                      raw_text.match?(/\bTag with\b|\bNote if\b|\bAdd note\b|\bMark as\b/i) ||
+                      (raw_text.match?(/Follow.?up/i) && raw_text.length < 30) ||
+                      (raw_text.length < 25 && !raw_text.match?(/\@|http/i))
+            
+            event_type = :task if is_task
+          end
+        end
       
       # Parse timestamp (milliseconds since epoch)
       occurred_at = @raw_json['timelineTime'] ? Time.at(@raw_json['timelineTime'] / 1000.0) : Time.current
       
-      # Build metadata based on event type
-      metadata = build_json_metadata(type_code, content, international)
+      # Build metadata based on ACTUAL event type (not just type code)
+      metadata = build_json_metadata(type_code, content, international, event_type)
       
       {
         lofty_timeline_id: @raw_json['id'],
@@ -136,7 +157,7 @@ module Lofty
         body ||= content.dig('activityContent', 'message')
       when 5, 6, 37, 124, 128, 131  # Emails
         body ||= content['subject'] || content['snippet'] || content['body']
-      when 103, 104  # Tasks
+      when 2, 103, 104, 105  # Tasks
         body ||= content['taskContent'] || content['content']
       when 21, 38  # Profile/pipeline changes
         details = content['detail']
@@ -163,12 +184,12 @@ module Lofty
       end
     end
     
-    def build_json_metadata(type_code, content, international)
+    def build_json_metadata(type_code, content, international, actual_event_type = nil)
       metadata = {
         'raw_json' => @raw_json.to_json
       }
       
-      # Add type-specific metadata
+      # Add type-specific metadata based on actual event type (handles type 103 correctly)
       case type_code
       when 16  # Notes
         metadata['note_content'] = extract_json_body(type_code, content, international)
@@ -183,9 +204,30 @@ module Lofty
         metadata['emailSubject'] = content['subject']
         metadata['emailType'] = content['type'] || (type_code == 6 ? 'manual' : 'auto')
         metadata['email_body'] = content['body'] || content['snippet']
-      when 103, 104  # Tasks
+      when 103  # Mixed: check actual_event_type
+        if actual_event_type == :email_sent
+          metadata['emailSubject'] = content['subject']
+          metadata['emailType'] = content['type'] || 'auto'
+          metadata['email_body'] = content['body'] || content['snippet']
+        else  # task
+          metadata['task_title'] = content['taskTitle'] || extract_json_body(type_code, content, international)
+          metadata['task_status'] = 'pending'
+          metadata['task_type'] = content['taskType']
+          metadata['is_plan_task'] = content['isPlanTask']
+          metadata['plan_name'] = content['planName']
+        end
+      when 104, 105  # Tasks completed
         metadata['task_title'] = content['taskTitle'] || extract_json_body(type_code, content, international)
-        metadata['task_status'] = type_code == 104 ? 'completed' : 'pending'
+        metadata['task_status'] = 'completed'
+        metadata['task_type'] = content['taskType']
+        metadata['is_plan_task'] = content['isPlanTask']
+        metadata['plan_name'] = content['planName']
+      when 2  # Task edited
+        metadata['task_title'] = content['taskTitle'] || extract_json_body(type_code, content, international)
+        metadata['task_status'] = 'edited'
+        metadata['task_type'] = content['taskType']
+        metadata['is_plan_task'] = content['isPlanTask']
+        metadata['plan_name'] = content['planName']
       when 21, 38  # Changes
         metadata['details'] = content['detail']
       end
@@ -216,7 +258,7 @@ module Lofty
 
     def email_sent?
       return false if @entry.type_code == 5 || @entry.type_code == 37 || @entry.type_code == 131
-      
+
       [6, 124, 128, 103].include?(@entry.type_code) &&
         @raw_text.match?(/\[(Auto|Manual) E-Mail\]/i)
     end
@@ -250,6 +292,8 @@ module Lofty
 
     def task_creation?(text)
       # Tasks with "was created" are Lofty internal tracking, skip them
+      # EXCEPT if they contain (Auto Email) or (Auto Text) - those are real emails/SMS
+      return false if text.match?(/\(Auto Email\)|\(Auto Text\)/i)
       text.match?(/task.*was created/i)
     end
 

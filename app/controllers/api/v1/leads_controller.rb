@@ -12,23 +12,37 @@ module Api
         email_opened_events = events.select { |e| e.event_type == 'email_opened' }
         unsub_events = events.select { |e| e.event_type.in?(%w[unsub manual_unsub]) }
 
-        # Group email_opened events by subject to link them to email_sent
+        # Group email_opened events with their corresponding email_sent
+        # Match by subject AND timestamp (opens must be after sends)
         opened_events = events.select { |e| e.event_type == 'email_opened' }
-        opened_by_subject = {}
         
-        opened_events.each do |event|
+        # Build a hash: sent_event_id => [opened_timestamps]
+        opens_by_sent_id = {}
+        
+        opened_events.each do |open_event|
           # Extract subject from rawText
-          raw_text = event.metadata['rawText']
+          raw_text = open_event.metadata['rawText']
           subject = nil
+          
           if raw_text.present?
-            lines = raw_text.split("\n")
-            subject = lines[1] if lines.length > 1
+            if raw_text =~ /opened email\s+(.+?)\s+[A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}/
+              subject = $1.strip
+            end
           end
-          subject ||= event.metadata['emailSubject']
+          
+          subject ||= open_event.metadata['emailSubject']
           
           if subject.present?
-            opened_by_subject[subject] ||= []
-            opened_by_subject[subject] << event.occurred_at
+            # Find the most recent email_sent with matching subject BEFORE this open
+            matching_sent = email_sent_events
+              .select { |e| e.metadata['emailSubject'] == subject || e.raw_text&.include?(subject) }
+              .select { |e| e.occurred_at < open_event.occurred_at }
+              .max_by(&:occurred_at)
+            
+            if matching_sent
+              opens_by_sent_id[matching_sent.id] ||= []
+              opens_by_sent_id[matching_sent.id] << open_event.occurred_at
+            end
           end
         end
 
@@ -37,8 +51,8 @@ module Api
         grouped_unsubs = unsub_events.group_by { |e| e.occurred_at.to_s }
         processed_unsub_times = Set.new
 
-        # Build timeline, excluding standalone email_opened events and duplicate unsubs
-        timeline = events.reject { |e| e.event_type == 'email_opened' }.filter_map do |event|
+        # Build timeline with ALL events
+        timeline = events.filter_map do |event|
           # For unsub events, only process the first one in each timestamp group
           if event.event_type.in?(%w[unsub manual_unsub])
             time_key = event.occurred_at.to_s
@@ -76,8 +90,8 @@ module Api
             email_type = event.metadata['emailType']
             category = Lofty::EmailCategoryClassifier.classify(subject, email_type)
             
-            # Find all opens for this email
-            opens = opened_by_subject[subject] || []
+            # Find opens for this specific sent email by ID
+            opens = opens_by_sent_id[event.id] || []
             
             {
               id: event.id,
@@ -88,7 +102,8 @@ module Api
               opened: opens.any?,
               openedAt: opens,
               unsubDetails: nil,
-              metadata: build_event_metadata(event)
+              metadata: build_event_metadata(event),
+              rawText: event.raw_text
             }
           else
             # ALL OTHER EVENT TYPES: calls, SMS, notes, pipeline changes, smartplans, etc.
@@ -281,9 +296,12 @@ module Api
           base.merge!({
             task_title: event.metadata['task_title'],
             task_status: event.metadata['task_status'],
+            task_type: event.metadata['task_type'],
             task_due_date: event.metadata['task_due_date'],
             task_notes: event.metadata['task_notes'],
-            task_creator: event.metadata['task_creator']
+            task_creator: event.metadata['task_creator'],
+            plan_name: event.metadata['plan_name'],
+            is_plan_task: event.metadata['is_plan_task']
           })
         end
         
