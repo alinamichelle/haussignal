@@ -1,6 +1,6 @@
 class RawTimelineEntry
   attr_reader :lead_lofty_id, :event_id, :type_code, :timestamp_text, :raw_text, :audio_url,
-              :html_content, :data_attributes, :css_classes
+              :html_content, :data_attributes, :css_classes, :raw_json
 
   def initialize(
     lead_lofty_id:,
@@ -11,7 +11,8 @@ class RawTimelineEntry
     audio_url: nil,
     html_content: nil,
     data_attributes: {},
-    css_classes: []
+    css_classes: [],
+    raw_json: nil
   )
     @lead_lofty_id    = lead_lofty_id
     @event_id         = event_id
@@ -22,5 +23,6 @@ class RawTimelineEntry
     @html_content     = html_content
     @data_attributes  = data_attributes || {}
     @css_classes      = css_classes || []
+    @raw_json         = raw_json
   end
 end

@@ -34,6 +34,7 @@ module Lofty
     def initialize(entry, lead)
       @entry = entry
       @lead = lead
+      @raw_json = entry.raw_json
       @raw_text = entry.raw_text.to_s
       @html_content = entry.html_content.to_s
       @css_classes = entry.css_classes || []
@@ -41,6 +42,10 @@ module Lofty
     end
 
     def parse
+      # If we have JSON from API, use that (includes full note bodies, SMS, etc.)
+      return parse_from_json if @raw_json.present?
+      
+      # Otherwise fall back to DOM-based parsing
       # Skip tasks (they're not real activities, just Lofty internal tracking)
       return nil if task_creation?(@raw_text)
 
@@ -66,6 +71,102 @@ module Lofty
       Rails.logger.error("Entry: type_code=#{@entry.type_code}, text=#{@raw_text[0..100]}")
       Rails.logger.error("HTML: #{@html_content[0..500]}")
       nil
+    end
+    
+    # Parse timeline data from Lofty's API JSON response
+    def parse_from_json
+      require 'action_view'
+      include ActionView::Helpers::SanitizeHelper
+      
+      type_code = @raw_json['timelineType']
+      content = @raw_json['content'] || {}
+      international = @raw_json['international'] || {}
+      
+      # Extract event type from type code
+      event_type = TYPE_CODE_MAPPINGS[type_code] || :other
+      
+      # Extract full text body based on event type
+      raw_text = extract_json_body(type_code, content, international)
+      
+      # Skip task creation events
+      return nil if raw_text&.match?(/task.*was created/i)
+      
+      # Parse timestamp (milliseconds since epoch)
+      occurred_at = @raw_json['timelineTime'] ? Time.at(@raw_json['timelineTime'] / 1000.0) : Time.current
+      
+      # Build metadata based on event type
+      metadata = build_json_metadata(type_code, content, international)
+      
+      {
+        lofty_timeline_id: @raw_json['id'],
+        type_code: type_code,
+        event_type: event_type,
+        occurred_at: occurred_at,
+        raw_text: raw_text,
+        agent_id: nil,  # Could extract from content if needed
+        metadata: metadata
+      }
+    end
+    
+    def extract_json_body(type_code, content, international)
+      # Try international.content first (often has full formatted text)
+      body = international['content']
+      
+      # Type-specific extraction
+      case type_code
+      when 16  # Notes
+        body ||= content['note']
+      when 8, 25  # Calls
+        body ||= content.dig('activityContent', 'message')
+      when 5, 6, 37, 124, 128, 131  # Emails
+        body ||= content['subject'] || content['snippet'] || content['body']
+      when 103, 104  # Tasks
+        body ||= content['taskContent'] || content['content']
+      when 21, 38  # Profile/pipeline changes
+        details = content['detail']
+        body ||= details.is_a?(Array) ? details.join(", ") : details
+      else
+        body ||= content['content'] || content['message'] || content['note']
+      end
+      
+      # Strip HTML tags and decode entities
+      if body.present?
+        body = strip_tags(body)
+        body = CGI.unescapeHTML(body)
+        body.gsub(/\s+/, ' ').strip
+      end
+      
+      body || international['title'] || ''
+    end
+    
+    def build_json_metadata(type_code, content, international)
+      metadata = {
+        'raw_json' => @raw_json.to_json
+      }
+      
+      # Add type-specific metadata
+      case type_code
+      when 16  # Notes
+        metadata['note_content'] = extract_json_body(type_code, content, international)
+        metadata['note_author'] = content['lastEditorName']
+      when 8, 25  # Calls
+        act = content['activityContent'] || {}
+        metadata['call_notes'] = act['message']
+        metadata['call_result'] = act['outcome']
+        metadata['caller_number'] = act['callNumber']
+        metadata['call_direction'] = type_code == 8 ? 'inbound' : 'outbound'
+      when 5, 6, 37, 124, 128, 131  # Emails
+        metadata['emailSubject'] = content['subject']
+        metadata['emailType'] = content['type'] || (type_code == 6 ? 'manual' : 'auto')
+        metadata['email_body'] = content['body'] || content['snippet']
+      when 103, 104  # Tasks
+        metadata['task_title'] = content['taskTitle'] || extract_json_body(type_code, content, international)
+        metadata['task_status'] = type_code == 104 ? 'completed' : 'pending'
+      when 21, 38  # Changes
+        metadata['details'] = content['detail']
+      end
+      
+      metadata.compact
     end
 
     private

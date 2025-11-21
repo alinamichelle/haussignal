@@ -106,7 +106,7 @@ module Lofty
         entries
       end
 
-      # Scrape all timeline events (for Phase 1)
+      # Scrape all timeline events using Lofty's API (not DOM)
       def scrape_all_for_lead(lofty_lead_id)
         entries = []
 
@@ -121,97 +121,57 @@ module Lofty
           page    = context.new_page
 
           url = "#{ENV['LOFTY_BASE_URL']}/admin/home/detail?leadId=#{lofty_lead_id}"
-          Rails.logger.info "🔵 Scraping: #{url}"
+          Rails.logger.info "🔵 Fetching timeline via API: #{lofty_lead_id}"
           
           page.goto(url, waitUntil: 'networkidle')
-          page.wait_for_timeout(3000)
+          page.wait_for_timeout(2000)
 
-          # Auto-scroll to load all timeline items
-          auto_scroll(page)
+          # Use Lofty's timeline API to get complete data including note bodies
+          Rails.logger.info "🌐 Calling Lofty timeline API..."
           
-          # Expand all collapsed content (notes, call details, etc.)
-          expand_all_timeline_content(page)
+          timeline_data = page.evaluate(<<~JS, lofty_lead_id)
+            async (leadId) => {
+              const results = [];
+              let curPage = 0;
+              let hasMore = 1;
 
-          # Extract all timeline items with full metadata
-          items = page.eval_on_selector_all(
-            @selectors['timeline_item'],
-            <<~JS
-              elements => elements.map(el => {
-                // Extract all data-* attributes
-                const dataAttributes = {};
-                Array.from(el.attributes).forEach(attr => {
-                  if (attr.name.startsWith('data-')) {
-                    dataAttributes[attr.name.replace('data-', '')] = attr.value;
-                  }
-                });
+              while (hasMore) {
+                const res = await fetch(
+                  `/api/lead-timeline-server/timeline/lead/all/filtered?curPage=${curPage}&pageSize=200&leadId=${leadId}&i18nL=en&_=${Date.now()}`,
+                  { credentials: 'include' }
+                );
+                const data = await res.json();
+                const timelines = data.data?.timeLines || [];
+                results.push(...timelines);
                 
-                // Extract CSS classes
-                const cssClasses = Array.from(el.classList);
+                hasMore = data.data?.hasMore ? 1 : 0;
+                curPage += 1;
                 
-                // Get HTML content for detailed parsing
-                // Use entire timeline-item HTML to capture shadow-root-container
-                const htmlContent = el.innerHTML || '';
-                
-                // Extract all possible email metadata from data attributes
-                const emailId = el.getAttribute('data-email-id') || 
-                               el.getAttribute('data-emailid') ||
-                               el.getAttribute('data-message-id') || '';
-                               
-                const emailSubject = el.getAttribute('data-email-subject') ||
-                                    el.getAttribute('data-subject') || '';
-                                    
-                const emailType = el.getAttribute('data-email-type') ||
-                                 el.getAttribute('data-type') || '';
-                
-                // Get text from both content and main areas (some content is in timeline-main)
-                const contentText = (el.querySelector('#{@selectors['content']}') || {}).innerText || '';
-                const mainText = (el.querySelector('.timeline-main') || {}).innerText || '';
-                const titleText = (el.querySelector('.timeline-title') || {}).innerText || '';
-                
-                // Check for shadow-root-container (Lofty has typo: "shawdow-root-container")
-                const shadowText = (el.querySelector('.shawdow-root-container') || {}).innerText || '';
-                const shadowText2 = (el.querySelector('.shadow-root-container') || {}).innerText || '';
-                
-                // Combine all text sources, preferring the longest
-                let rawText = contentText;
-                if (mainText.length > rawText.length) rawText = mainText;
-                if (titleText.length > rawText.length) rawText = titleText;
-                if (shadowText.length > rawText.length) rawText = shadowText;
-                if (shadowText2.length > rawText.length) rawText = shadowText2;
-                
-                // Fallback: get all text from the element
-                if (!rawText) rawText = el.innerText || '';
-                
-                return {
-                  eventId: el.getAttribute('#{@selectors['timeline_id_attr']}'),
-                  typeCode: parseInt(el.getAttribute('#{@selectors['timeline_type_attr']}') || '0', 10),
-                  timestampText: (el.querySelector('#{@selectors['timestamp']}') || {}).innerText || '',
-                  rawText: rawText,
-                  audioUrl: el.querySelector('#{@selectors['audio']}') ? el.querySelector('#{@selectors['audio']}').getAttribute('src') : null,
-                  htmlContent: htmlContent,
-                  dataAttributes: dataAttributes,
-                  cssClasses: cssClasses,
-                  emailId: emailId,
-                  emailSubject: emailSubject,
-                  emailType: emailType
-                };
-              })
-            JS
-          )
+                // Safety check to avoid infinite loop
+                if (curPage > 50) {
+                  console.log('Hit page limit, stopping');
+                  break;
+                }
+              }
 
-          Rails.logger.info "📊 Found #{items.length} total timeline items"
+              return results;
+            }
+          JS
 
-          items.each do |item|
+          Rails.logger.info "📊 Found #{timeline_data.length} timeline items from API"
+
+          timeline_data.each do |item|
             entries << RawTimelineEntry.new(
               lead_lofty_id: lofty_lead_id,
-              event_id: item['eventId'],
-              type_code: item['typeCode'],
-              timestamp_text: item['timestampText'],
-              raw_text: item['rawText'],
-              audio_url: item['audioUrl'],
-              html_content: item['htmlContent'],
-              data_attributes: item['dataAttributes'],
-              css_classes: item['cssClasses']
+              event_id: item['id'],
+              type_code: item['timelineType'],
+              timestamp_text: nil,  # Will use timelineTime
+              raw_text: nil,        # Will be extracted from JSON in parser
+              audio_url: nil,
+              html_content: nil,
+              data_attributes: {},
+              css_classes: [],
+              raw_json: item        # Store entire JSON for parsing
             )
           end
 
