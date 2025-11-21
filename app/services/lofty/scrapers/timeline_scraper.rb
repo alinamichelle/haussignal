@@ -163,11 +163,24 @@ module Lofty
                 const emailType = el.getAttribute('data-email-type') ||
                                  el.getAttribute('data-type') || '';
                 
+                // Get text from both content and main areas (some content is in timeline-main)
+                const contentText = (el.querySelector('#{@selectors['content']}') || {}).innerText || '';
+                const mainText = (el.querySelector('.timeline-main') || {}).innerText || '';
+                const titleText = (el.querySelector('.timeline-title') || {}).innerText || '';
+                
+                // Combine all text sources, preferring the longest
+                let rawText = contentText;
+                if (mainText.length > rawText.length) rawText = mainText;
+                if (titleText.length > rawText.length) rawText = titleText;
+                
+                // Fallback: get all text from the element
+                if (!rawText) rawText = el.innerText || '';
+                
                 return {
                   eventId: el.getAttribute('#{@selectors['timeline_id_attr']}'),
                   typeCode: parseInt(el.getAttribute('#{@selectors['timeline_type_attr']}') || '0', 10),
                   timestampText: (el.querySelector('#{@selectors['timestamp']}') || {}).innerText || '',
-                  rawText: (el.querySelector('#{@selectors['content']}') || {}).innerText || '',
+                  rawText: rawText,
                   audioUrl: el.querySelector('#{@selectors['audio']}') ? el.querySelector('#{@selectors['audio']}').getAttribute('src') : null,
                   htmlContent: htmlContent,
                   dataAttributes: dataAttributes,
@@ -287,16 +300,48 @@ module Lofty
       def expand_all_timeline_content(page)
         Rails.logger.info "🔍 Expanding collapsed timeline content..."
         
-        # Click all "View more", "Show more", "View details" buttons
+        # First, try clicking on each timeline item to expand it
+        begin
+          timeline_items = page.locator('.timeline-item')
+          count = timeline_items.count
+          Rails.logger.info "  Clicking on #{count} timeline items to expand..."
+          
+          count.times do |i|
+            begin
+              # Click on the timeline-main or timeline-content area
+              item = timeline_items.nth(i)
+              main = item.locator('.timeline-main, .timeline-content').first
+              if main
+                main.click(timeout: 500, force: true)
+                page.wait_for_timeout(100)
+              end
+            rescue => e
+              # Item might not be clickable, continue
+            end
+          end
+          
+          page.wait_for_timeout(500)
+        rescue => e
+          Rails.logger.warn "  ⚠️ Error clicking timeline items: #{e.message}"
+        end
+        
+        # Then click all "View more", "Show more", "View details" buttons
         expand_selectors = [
           '.timeline-main .more-text',
-          '.timeline-content .more-text', 
+          '.timeline-content .more-text',
+          '.timeline-title .more-text',
           '.show-more',
           '.view-more',
+          '.view-detail',
           '.expand-button',
           'button:has-text("View more")',
           'button:has-text("Show more")',
-          'span:has-text("More")'
+          'button:has-text("View Details")',
+          'span:has-text("More")',
+          'span:has-text("Less")',
+          'a:has-text("More")',
+          '.timeline-item [class*="more"]',
+          '.timeline-item [class*="expand"]'
         ]
         
         expand_selectors.each do |selector|
@@ -305,11 +350,11 @@ module Lofty
             count = buttons.count
             
             if count > 0
-              Rails.logger.info "  Found #{count} '#{selector}' buttons, clicking..."
+              Rails.logger.info "  Found #{count} '#{selector}' elements, clicking..."
               count.times do |i|
                 begin
-                  buttons.nth(i).click(timeout: 1000)
-                  page.wait_for_timeout(200)
+                  buttons.nth(i).click(timeout: 1000, force: true)
+                  page.wait_for_timeout(150)
                 rescue => e
                   # Button might not be clickable, skip it
                 end
