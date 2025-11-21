@@ -153,7 +153,10 @@ module Lofty
             raw_text: attrs[:raw_text],
             metadata: attrs[:metadata],
             agent_id: attrs[:agent_id],
-            email_category: attrs[:email_category]
+            email_category: attrs[:email_category],
+            from_pipeline: attrs[:from_pipeline],
+            to_pipeline: attrs[:to_pipeline],
+            recording_available: attrs[:recording_available]
           )
           
           # Increment stat for this event type

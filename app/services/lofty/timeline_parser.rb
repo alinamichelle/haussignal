@@ -145,6 +145,8 @@ module Lofty
     # =====================================================
 
     def parse_call
+      recording_url = extract_recording_url
+      
       {
         lofty_timeline_id: @entry.event_id,
         type_code: @entry.type_code,
@@ -152,6 +154,7 @@ module Lofty
         occurred_at: parse_timestamp,
         raw_text: @raw_text,
         agent_id: extract_agent_id,
+        recording_available: recording_url.present? || has_recording_button?,
         metadata: {
           "call_direction" => extract_call_direction,
           "call_duration_seconds" => extract_call_duration,
@@ -160,7 +163,7 @@ module Lofty
           "call_notes" => extract_call_notes,
           "caller_number" => extract_caller_number,
           "virtual_number" => extract_virtual_number,
-          "lofty_recording_url" => extract_recording_url,
+          "lofty_recording_url" => recording_url,
           "recording_id" => extract_recording_id,
           "call_transcription" => extract_call_transcription,
           "recording_downloaded" => false,
@@ -327,18 +330,24 @@ module Lofty
     end
 
     def parse_pipeline_change
+      from_stage = extract_from_stage
+      to_stage = extract_to_stage
+      
       {
         lofty_timeline_id: @entry.event_id,
         type_code: @entry.type_code,
-        event_type: :other,  # Use :other for now, can add :pipeline_change to enum later
+        event_type: :other,  # Use :other for now
         occurred_at: parse_timestamp,
         raw_text: @raw_text,
         agent_id: extract_agent_id,
+        from_pipeline: from_stage,
+        to_pipeline: to_stage,
         metadata: {
           "activity_type" => "pipeline_change",
-          "from" => extract_from_stage,
-          "to" => extract_to_stage,
+          "from" => from_stage,
+          "to" => to_stage,
           "reason" => extract_change_reason,
+          "actor" => extract_pipeline_actor,
           "raw_html" => @html_content
         }
       }
@@ -507,6 +516,13 @@ module Lofty
       @data_attributes['transcription'] || @data_attributes['call-transcript']
     end
 
+    def has_recording_button?
+      # Check if HTML contains recording download button/icon
+      @html_content.match?(/download.*recording|recording.*download|icon.*download.*audio/i) ||
+        @css_classes.any? { |c| c.match?(/recording|audio.*download/i) } ||
+        @data_attributes.keys.any? { |k| k.match?(/recording|audio/i) }
+    end
+
     def normalize_phone_number(phone)
       # Normalize to consistent format
       digits = phone.gsub(/\D/, '')
@@ -534,13 +550,32 @@ module Lofty
     end
 
     def extract_sms_body
-      # The full message is usually in the raw text
-      # Remove headers/timestamps to get just the message
+      # Enhanced SMS body extraction for threads, nested HTML, long messages
+      
+      # Try to extract from HTML first (handles nested blocks)
+      if @html_content.present?
+        # Look for message content in div/p tags
+        if @html_content =~ /<div[^>]*class=["'][^"']*message[^"']*["'][^>]*>(.+?)<\/div>/im
+          body = $1.gsub(/<[^>]+>/, ' ').strip  # Strip HTML tags
+          return body if body.length > 10
+        end
+        
+        if @html_content =~ /<p[^>]*>(.+?)<\/p>/im
+          body = $1.gsub(/<[^>]+>/, ' ').strip
+          return body if body.length > 10  
+        end
+      end
+      
+      # Fall back to raw text parsing
       lines = @raw_text.lines.map(&:strip).reject(&:blank?)
       
       # Skip first line if it's a header (like "SMS sent to Lead:")
-      return lines[1..-1].join("\n") if lines.length > 1 && lines[0].match?(/SMS|Text|sent|received/i)
+      if lines.length > 1 && lines[0].match?(/SMS|Text|sent|received|at\s+\d{2}:/i)
+        body = lines[1..-1].join("\n")
+        return body if body.present?
+      end
       
+      # Return full text if no better option
       @raw_text
     end
 
@@ -663,19 +698,46 @@ module Lofty
         return $1.strip
       end
       
+      # Look in HTML for hidden from value
+      if @html_content =~ /data-from-pipeline=["']([^"']+)["']/i
+        return $1.strip
+      end
+      
       nil
     end
 
     def extract_to_stage
-      # Pattern: "to Stage"
-      if @raw_text =~ /to\s+([^\n,\.]+)/i
+      # Pattern: "to Stage" or "Moved to Stage"
+      if @raw_text =~ /(?:to|moved to)\s+([^\n,\.]+)/i
         stage = $1.strip
         # Clean up common suffixes
         stage = stage.sub(/\s*view details$/i, '')
-        return stage
+        stage = stage.sub(/\s*from.*$/i, '')  # Remove any "from" text
+        return stage if stage.present?
+      end
+      
+      # Look in HTML for hidden to value  
+      if @html_content =~ /data-to-pipeline=["']([^"']+)["']/i
+        return $1.strip
+      end
+      
+      # Pattern: just "Stage Name" after "changed pipeline"
+      if @raw_text =~ /changed.*pipeline[:\s]+([^\n\.]+)/i
+        return $1.strip
       end
       
       nil
+    end
+
+    def extract_pipeline_actor
+      # Extract who made the pipeline change
+      # Pattern: "Agent Name changed Lead's pipeline"
+      if @raw_text =~ /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:\s+[A-Z][a-z]+)?)\s+changed/i
+        return $1.strip
+      end
+      
+      # Fallback to generic agent extraction
+      extract_agent_name_from_text
     end
 
     def extract_change_reason

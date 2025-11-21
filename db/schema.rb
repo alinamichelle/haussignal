@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2025_11_21_000408) do
+ActiveRecord::Schema[7.1].define(version: 2025_11_21_004351) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -40,6 +40,9 @@ ActiveRecord::Schema[7.1].define(version: 2025_11_21_000408) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "email_category"
+    t.string "from_pipeline"
+    t.string "to_pipeline"
+    t.boolean "recording_available", default: false
     t.index "((metadata ->> 'campaign_id'::text))", name: "index_events_on_campaign_id"
     t.index ["agent_id"], name: "index_events_on_agent_id"
     t.index ["event_type"], name: "index_events_on_event_type"
