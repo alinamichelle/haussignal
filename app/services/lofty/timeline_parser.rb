@@ -623,8 +623,33 @@ module Lofty
 
     # Task-specific extractors
     def extract_task_title
-      # First line is usually the task title
-      @raw_text.lines.first&.strip
+      lines = @raw_text.lines.map(&:strip).reject(&:blank?)
+      first_line = lines.first || ""
+      second_line = lines[1] || ""
+      
+      # Smart Plan Pattern: "Agent completed Task: Description (Call) from Smart Plan"
+      # Extract just the action and task type
+      if first_line =~ /completed Task[:\s]+(.+?)\(([^)]+)\)\s+from Smart Plan/i
+        task_type = $2.strip  # "Call", "Auto Email", "Auto Text", etc.
+        return "Completed #{task_type} (task type)"
+      end
+      
+      # Smart Plan Pattern: "Task: Description (TaskType) was created"
+      if first_line =~ /Task[:\s]+(.+?)\(([^)]+)\)\s+was created/i
+        task_type = $2.strip
+        return "Created #{task_type} (task type)"
+      end
+      
+      # Manual task pattern: "Agent completed task" on line 1, description on line 2
+      if first_line =~ /completed task$/i && second_line.present?
+        # Extract first ~50 chars of description as title
+        description = second_line[0..50]
+        description += "..." if second_line.length > 50
+        return "Completed task: #{description}"
+      end
+      
+      # Default: return full first line
+      first_line
     end
 
     def extract_task_status
@@ -656,7 +681,30 @@ module Lofty
 
     def extract_task_notes
       lines = @raw_text.lines.map(&:strip).reject(&:blank?)
-      lines.length > 1 ? lines[1..-1].join("\n") : nil
+      first_line = lines.first || ""
+      
+      # Smart Plan task: extract the full task description
+      if first_line =~ /completed Task[:\s]+(.+?)\(([^)]+)\)\s+from Smart Plan/i
+        full_task = $1.strip
+        return "Task: #{full_task}"
+      end
+      
+      if first_line =~ /Task[:\s]+(.+?)\(([^)]+)\)\s+was created/i
+        full_task = $1.strip
+        return "Task: #{full_task}"
+      end
+      
+      # Manual task: line 2 is the full description, skip timestamp at end
+      if first_line =~ /completed task$/i && lines.length > 1
+        # Get line 2 (description), remove "Less" artifact and timestamp
+        description = lines[1].gsub(/\s*Less\s*$/i, '').strip
+        return description if description.present?
+      end
+      
+      # Otherwise return remaining lines, skip timestamps
+      remaining = lines[1..-1] || []
+      remaining = remaining.reject { |line| line.match?(/^[A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}\s+at\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M$/i) }
+      remaining.join("\n").strip.presence
     end
 
     def extract_task_creator
