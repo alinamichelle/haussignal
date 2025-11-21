@@ -12,6 +12,7 @@ class Event < ApplicationRecord
     sms: 'sms',
     smartplan: 'smartplan',
     note: 'note',
+    task: 'task',
     alert_view: 'alert_view',
     other: 'other'
   }

@@ -266,13 +266,22 @@ module Api
           })
         end
         
-        # Add task/note metadata
+        # Add note metadata
         if event.event_type == 'note'
+          base.merge!({
+            note_content: event.metadata['note_content'],
+            note_author: event.metadata['note_author']
+          })
+        end
+        
+        # Add task metadata
+        if event.event_type == 'task'
           base.merge!({
             task_title: event.metadata['task_title'],
             task_status: event.metadata['task_status'],
-            note_content: event.metadata['note_content'],
-            note_author: event.metadata['note_author']
+            task_due_date: event.metadata['task_due_date'],
+            task_notes: event.metadata['task_notes'],
+            task_creator: event.metadata['task_creator']
           })
         end
         

@@ -296,7 +296,7 @@ module Lofty
       {
         lofty_timeline_id: @entry.event_id,
         type_code: @entry.type_code,
-        event_type: :note,  # Map tasks to :note since they're similar
+        event_type: :task,
         occurred_at: parse_timestamp,
         raw_text: @raw_text,
         agent_id: extract_agent_id,
