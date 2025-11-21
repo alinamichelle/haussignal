@@ -128,6 +128,9 @@ module Lofty
 
           # Auto-scroll to load all timeline items
           auto_scroll(page)
+          
+          # Expand all collapsed content (notes, call details, etc.)
+          expand_all_timeline_content(page)
 
           # Extract all timeline items with full metadata
           items = page.eval_on_selector_all(
@@ -278,6 +281,47 @@ module Lofty
       # Legacy method - calls new system
       def auto_scroll(page)
         load_full_email_timeline(page)
+      end
+      
+      # Expand all collapsed timeline content (notes, call details, etc.)
+      def expand_all_timeline_content(page)
+        Rails.logger.info "🔍 Expanding collapsed timeline content..."
+        
+        # Click all "View more", "Show more", "View details" buttons
+        expand_selectors = [
+          '.timeline-main .more-text',
+          '.timeline-content .more-text', 
+          '.show-more',
+          '.view-more',
+          '.expand-button',
+          'button:has-text("View more")',
+          'button:has-text("Show more")',
+          'span:has-text("More")'
+        ]
+        
+        expand_selectors.each do |selector|
+          begin
+            buttons = page.locator(selector)
+            count = buttons.count
+            
+            if count > 0
+              Rails.logger.info "  Found #{count} '#{selector}' buttons, clicking..."
+              count.times do |i|
+                begin
+                  buttons.nth(i).click(timeout: 1000)
+                  page.wait_for_timeout(200)
+                rescue => e
+                  # Button might not be clickable, skip it
+                end
+              end
+            end
+          rescue => e
+            # Selector might not exist, continue
+          end
+        end
+        
+        Rails.logger.info "✅ Finished expanding content"
+        page.wait_for_timeout(1000)
       end
     end
   end

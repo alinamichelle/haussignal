@@ -45,7 +45,9 @@ module Lofty
       return nil if task_creation?(@raw_text)
 
       # Detect activity type and parse accordingly
+      # IMPORTANT: task? must come before call? because type 104 contains "(Call)" text
       case
+      when task?          then parse_task
       when call?          then parse_call
       when sms?           then parse_sms
       when email_sent?    then parse_email_sent
@@ -53,7 +55,6 @@ module Lofty
       when unsub?         then parse_unsub
       when manual_unsub?  then parse_manual_unsub
       when note?          then parse_note
-      when task?          then parse_task
       when smartplan?     then parse_smartplan
       when pipeline_change? then parse_pipeline_change
       when website_activity? then parse_website_activity
@@ -470,7 +471,17 @@ module Lofty
     def extract_call_notes
       # Extract any text after the main call description
       lines = @raw_text.lines.map(&:strip).reject(&:blank?)
-      lines.length > 1 ? lines[1..-1].join("\n") : nil
+      
+      # Skip first line (main description) and last line if it's a timestamp
+      return nil if lines.length <= 1
+      
+      notes_lines = lines[1..-1]
+      
+      # Remove timestamp line if present (format: "Nov 19, 2025 at 03:05:07 PM")
+      notes_lines = notes_lines.reject { |line| line.match?(/^[A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}\s+at\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M$/i) }
+      
+      notes_text = notes_lines.join("\n").strip
+      notes_text.present? ? notes_text : nil
     end
 
     def extract_call_status
