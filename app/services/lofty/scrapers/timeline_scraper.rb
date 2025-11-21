@@ -168,10 +168,16 @@ module Lofty
                 const mainText = (el.querySelector('.timeline-main') || {}).innerText || '';
                 const titleText = (el.querySelector('.timeline-title') || {}).innerText || '';
                 
+                // Check for shadow-root-container (Lofty has typo: "shawdow-root-container")
+                const shadowText = (el.querySelector('.shawdow-root-container') || {}).innerText || '';
+                const shadowText2 = (el.querySelector('.shadow-root-container') || {}).innerText || '';
+                
                 // Combine all text sources, preferring the longest
                 let rawText = contentText;
                 if (mainText.length > rawText.length) rawText = mainText;
                 if (titleText.length > rawText.length) rawText = titleText;
+                if (shadowText.length > rawText.length) rawText = shadowText;
+                if (shadowText2.length > rawText.length) rawText = shadowText2;
                 
                 // Fallback: get all text from the element
                 if (!rawText) rawText = el.innerText || '';
