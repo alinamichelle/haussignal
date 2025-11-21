@@ -149,8 +149,8 @@ module Lofty
                 const cssClasses = Array.from(el.classList);
                 
                 // Get HTML content for detailed parsing
-                const contentEl = el.querySelector('#{@selectors['content']}');
-                const htmlContent = contentEl ? contentEl.innerHTML : '';
+                // Use entire timeline-item HTML to capture shadow-root-container
+                const htmlContent = el.innerHTML || '';
                 
                 // Extract all possible email metadata from data attributes
                 const emailId = el.getAttribute('data-email-id') || 
