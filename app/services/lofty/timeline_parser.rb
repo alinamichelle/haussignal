@@ -38,10 +38,18 @@ module Lofty
       @entry = entry
       @lead = lead
       @raw_json = entry.raw_json
-      @raw_text = entry.raw_text.to_s
+      @raw_text = clean_raw_text(entry.raw_text.to_s)
       @html_content = entry.html_content.to_s
       @css_classes = entry.css_classes || []
       @data_attributes = entry.data_attributes || {}
+    end
+    
+    # Clean HTML tags from raw text (for DOM-parsed entries)
+    def clean_raw_text(text)
+      return text if text.blank?
+      cleaned = ActionView::Base.full_sanitizer.sanitize(text)
+      cleaned = CGI.unescapeHTML(cleaned)
+      cleaned.gsub(/\s+/, ' ').strip
     end
 
     def parse
@@ -139,12 +147,20 @@ module Lofty
       
       # Strip HTML tags and decode entities
       if body.present?
-        body = strip_tags(body)
+        body = ActionView::Base.full_sanitizer.sanitize(body)
         body = CGI.unescapeHTML(body)
         body.gsub(/\s+/, ' ').strip
       end
       
-      body || international['title'] || ''
+      # Fallback to title, but clean it too
+      result = body || international['title'] || ''
+      if result.present? && result.include?('<')
+        result = ActionView::Base.full_sanitizer.sanitize(result)
+        result = CGI.unescapeHTML(result)
+        result.gsub(/\s+/, ' ').strip
+      else
+        result
+      end
     end
     
     def build_json_metadata(type_code, content, international)

@@ -19,29 +19,29 @@ namespace :lofty do
     puts "🔄 Resyncing timeline for: #{lead.full_name} (#{lofty_lead_id})"
     puts "   Current event count: #{lead.events.count}"
     
-    # Delete all existing events
-    deleted_count = lead.events.count
-    lead.events.destroy_all
-    puts "   Deleted #{deleted_count} events"
-    
-    # Reset timeline sync timestamp
-    lead.update(timeline_synced_at: nil)
-    
-    # Re-scrape and sync
+    # Re-scrape timeline (NO DELETE - we'll upsert)
     puts "\n📡 Scraping timeline from Lofty..."
     scraper = Lofty::Scrapers::TimelineScraper.new
     entries = scraper.scrape_all_for_lead(lofty_lead_id)
     puts "   Scraped #{entries.length} timeline entries"
     
-    puts "\n💾 Parsing and saving events..."
+    # Track which event IDs we found in this scrape
+    scraped_event_ids = Set.new
+    
+    puts "\n💾 Parsing and upserting events..."
     saved = 0
+    updated = 0
     skipped = 0
     
     entries.each do |entry|
       parsed = Lofty::TimelineParser.parse(entry, lead: lead)
       
       if parsed
+        scraped_event_ids << parsed[:lofty_timeline_id]
+        
         event = Event.find_or_initialize_by(lofty_timeline_id: parsed[:lofty_timeline_id])
+        is_new = event.new_record?
+        
         event.assign_attributes(
           lead_id: lead.id,
           event_type: parsed[:event_type],
@@ -56,19 +56,30 @@ namespace :lofty do
         )
         
         if event.save
-          saved += 1
+          if is_new
+            saved += 1
+          else
+            updated += 1
+          end
         end
       else
         skipped += 1
       end
     end
     
+    # Optional: Delete events that weren't in the new scrape (they were removed from Lofty)
+    # Commented out for safety - uncomment if you want to remove stale events
+    # deleted = lead.events.where.not(lofty_timeline_id: scraped_event_ids.to_a).destroy_all
+    # puts "   Removed #{deleted.count} stale events"
+    
     # Update sync timestamp
     lead.update(timeline_synced_at: Time.current)
     
     puts "\n✅ Resync complete!"
-    puts "   Saved: #{saved} events"
+    puts "   New: #{saved} events"
+    puts "   Updated: #{updated} events"
     puts "   Skipped: #{skipped} events"
+    puts "   Total in DB: #{lead.events.count} events"
     puts "\n📊 Event breakdown:"
     
     lead.events.group(:event_type).count.sort_by { |k, v| -v }.each do |type, count|
