@@ -5,14 +5,22 @@ module Lofty
     TYPE_CODE_MAPPINGS = {
       5 => :email_opened,      # Manual email opened
       6 => :email_sent,        # Manual email sent
+      8 => :call,              # Call activity (lead called agent)
       25 => :call,             # Call activity (agent called lead)
       37 => :email_opened,     # Alert email opened
+      38 => :other,            # Pipeline change (will be detected by pipeline_change?)
+      93 => :note,             # Lead details updated (system)
+      98 => :note,             # Transaction assigned
       111 => :manual_unsub,    # Manual unsubscribe (agent action)
       113 => :unsub,           # Automatic unsubscribe (lead action)
+      116 => :note,            # Transaction created
+      120 => :note,            # Property edited
       124 => :email_sent,      # Auto email sent (can be mixed with tasks)
       128 => :email_sent,      # Auto email sent
       131 => :email_opened,    # Auto email opened
+      169 => :note,            # Lead reassignment
       103 => :email_sent,      # MIXED: Can be email OR task - requires text check
+      21 => :note,             # Profile edited
       
       # Additional type codes will be discovered and mapped as we scrape
       # Unknown codes default to :other
@@ -66,7 +74,7 @@ module Lofty
 
     def call?
       # Check type code first
-      return true if @entry.type_code == 25
+      return true if [8, 25].include?(@entry.type_code)
       
       @raw_text.match?(/\b(called|call|rang|phone|dialed|spoke|voicemail|answered)\b/i) ||
         @css_classes.any? { |c| c.match?(/call/i) } ||
@@ -121,7 +129,9 @@ module Lofty
     end
 
     def pipeline_change?
-      @raw_text.match?(/\b(moved|stage.*changed|pipeline.*changed)\b/i) ||
+      return true if @entry.type_code == 38
+      
+      @raw_text.match?(/\b(moved|stage.*changed|pipeline.*changed|changed.*pipeline)\b/i) ||
         @raw_text.match?(/from\s+[\w\s]+\s+to\s+[\w\s]+/i)
     end
 
@@ -643,16 +653,28 @@ module Lofty
 
     # Pipeline change extractors
     def extract_from_stage
+      # Pattern: "from Stage1 to Stage2"
       if @raw_text =~ /from\s+([^to]+)\s+to/i
         return $1.strip
       end
+      
+      # Pattern: "changed pipeline from Stage1"
+      if @raw_text =~ /pipeline\s+from\s+([^\n]+?)\s+to/i
+        return $1.strip
+      end
+      
       nil
     end
 
     def extract_to_stage
-      if @raw_text =~ /to\s+([^\n,]+)/i
-        return $1.strip
+      # Pattern: "to Stage"
+      if @raw_text =~ /to\s+([^\n,\.]+)/i
+        stage = $1.strip
+        # Clean up common suffixes
+        stage = stage.sub(/\s*view details$/i, '')
+        return stage
       end
+      
       nil
     end
 
