@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2025_11_20_014347) do
+ActiveRecord::Schema[7.1].define(version: 2025_11_21_000408) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -70,8 +70,10 @@ ActiveRecord::Schema[7.1].define(version: 2025_11_20_014347) do
     t.datetime "reg_date"
     t.string "lead_type"
     t.text "notes"
+    t.datetime "timeline_synced_at"
     t.index ["agent_id"], name: "index_leads_on_agent_id"
     t.index ["lofty_lead_id"], name: "index_leads_on_lofty_lead_id", unique: true
+    t.index ["timeline_synced_at"], name: "index_leads_on_timeline_synced_at"
   end
 
   add_foreign_key "events", "agents"
