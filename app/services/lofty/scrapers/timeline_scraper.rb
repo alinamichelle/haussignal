@@ -106,9 +106,10 @@ module Lofty
         entries
       end
 
-      # Scrape all timeline events using Lofty's API (not DOM)
+      # HYBRID SCRAPER: API for first 20 (rich content) + DOM for rest (full history)
       def scrape_all_for_lead(lofty_lead_id)
         entries = []
+        api_event_ids = Set.new
 
         Playwright.create(playwright_cli_executable_path: 'npx playwright') do |playwright|
           browser = playwright.chromium.launch(headless: true)
@@ -121,29 +122,90 @@ module Lofty
           page    = context.new_page
 
           url = "#{ENV['LOFTY_BASE_URL']}/admin/home/detail?leadId=#{lofty_lead_id}"
-          Rails.logger.info "🔵 Fetching timeline via API: #{lofty_lead_id}"
+          Rails.logger.info "🔵 HYBRID scraping for lead: #{lofty_lead_id}"
           
-          # Fetch all timeline data using Lofty's API with pagination
-          Rails.logger.info "🌐 Fetching timeline via API with pagination..."
+          # STEP 1: Get first 20 events from API (rich content with full note bodies)
+          puts "\n🌐 STEP 1: Fetching first 20 events via API (full note bodies)..."
+          api_timelines = fetch_first_page_json(page, lofty_lead_id, url)
+          puts "   ✅ API captured: #{api_timelines.length} events with rich content"
           
-          all_timelines = fetch_all_timeline_json(page, lofty_lead_id, url)
-          
-          puts "   ✅ Total timeline items collected: #{all_timelines.length}"
-
-          all_timelines.each do |item|
+          api_timelines.each do |item|
+            event_id = item['id'].to_s
+            api_event_ids << event_id
+            
             entries << RawTimelineEntry.new(
               lead_lofty_id: lofty_lead_id,
-              event_id: item['id'],
+              event_id: event_id,
               type_code: item['timelineType'],
-              timestamp_text: nil,  # Will use timelineTime
-              raw_text: nil,        # Will be extracted from JSON in parser
+              timestamp_text: nil,
+              raw_text: nil,
               audio_url: nil,
               html_content: nil,
               data_attributes: {},
               css_classes: [],
-              raw_json: item        # Store entire JSON for parsing
+              raw_json: item  # Full JSON for rich parsing
             )
           end
+          
+          # STEP 2: Get ALL events from DOM (full history)
+          puts "\n📜 STEP 2: Loading full timeline via DOM scroll (all history)..."
+          load_full_email_timeline(page)
+          
+          # Extract DOM events
+          items = page.eval_on_selector_all(
+            @selectors['timeline_item'],
+            <<~JS
+              elements => elements.map(el => {
+                const dataAttributes = {};
+                Array.from(el.attributes).forEach(attr => {
+                  if (attr.name.startsWith('data-')) {
+                    dataAttributes[attr.name.replace('data-', '')] = attr.value;
+                  }
+                });
+                
+                const cssClasses = Array.from(el.classList);
+                const contentEl = el.querySelector('#{@selectors['content']}');
+                const htmlContent = contentEl ? contentEl.innerHTML : '';
+                
+                return {
+                  eventId: el.getAttribute('#{@selectors['timeline_id_attr']}'),
+                  typeCode: parseInt(el.getAttribute('#{@selectors['timeline_type_attr']}') || '0', 10),
+                  timestampText: (el.querySelector('#{@selectors['timestamp']}') || {}).innerText || '',
+                  rawText: (el.querySelector('#{@selectors['content']}') || {}).innerText || '',
+                  audioUrl: el.querySelector('#{@selectors['audio']}') ? el.querySelector('#{@selectors['audio']}').getAttribute('src') : null,
+                  htmlContent: htmlContent,
+                  dataAttributes: dataAttributes,
+                  cssClasses: cssClasses
+                };
+              })
+            JS
+          )
+          
+          puts "   📊 DOM extracted: #{items.length} total events"
+          
+          # Add DOM events that weren't already captured by API
+          dom_added = 0
+          items.each do |item|
+            event_id = item['eventId']
+            next if api_event_ids.include?(event_id)  # Skip duplicates
+            
+            entries << RawTimelineEntry.new(
+              lead_lofty_id: lofty_lead_id,
+              event_id: event_id,
+              type_code: item['typeCode'],
+              timestamp_text: item['timestampText'],
+              raw_text: item['rawText'],
+              audio_url: item['audioUrl'],
+              html_content: item['htmlContent'],
+              data_attributes: item['dataAttributes'],
+              css_classes: item['cssClasses'],
+              raw_json: nil  # DOM events don't have JSON
+            )
+            dom_added += 1
+          end
+          
+          puts "   ✅ Added #{dom_added} older events from DOM"
+          puts "\n🎉 HYBRID TOTAL: #{entries.length} events (#{api_timelines.length} API + #{dom_added} DOM)"
 
           browser.close
         end
@@ -151,10 +213,8 @@ module Lofty
         entries
       end
       
-      # Fetch all timeline JSON with proper pagination
-      def fetch_all_timeline_json(page, lead_id, url)
-        results = []
-        page_num = 0
+      # Fetch first page from API (20 events with rich content)
+      def fetch_first_page_json(page, lead_id, url)
         captured_responses = []
         
         # Set up response listener BEFORE navigation
@@ -170,54 +230,15 @@ module Lofty
         page.goto(url, waitUntil: 'networkidle')
         page.wait_for_timeout(2000)
         
-        # Process first page
+        # Return first page only
         if captured_responses.any?
           response = captured_responses.first
           json = JSON.parse(response.body)
           data = json['data'] || {}
-          timelines = data['timeLines'] || []
-          has_more = data['hasMore'].to_i == 1
-          
-          puts "   Page 0: #{timelines.length} items (hasMore: #{has_more})"
-          results.concat(timelines)
-          page_num = 1
-          
-          # Paginate if needed
-          while has_more && page_num < 50
-            captured_responses.clear
-            
-            # Scroll multiple times to trigger lazy load
-            3.times do
-              page.evaluate <<~JS
-                const el = document.querySelector('.new-time-line-list');
-                if (el) {
-                  el.scrollTop = el.scrollHeight;
-                  el.scrollBy(0, 1000);
-                }
-              JS
-              page.wait_for_timeout(500)
-            end
-            
-            page.wait_for_timeout(3000)  # Wait longer for API
-            
-            if captured_responses.any?
-              response = captured_responses.last
-              json = JSON.parse(response.body)
-              data = json['data'] || {}
-              timelines = data['timeLines'] || []
-              has_more = data['hasMore'].to_i == 1
-              
-              puts "   Page #{page_num}: #{timelines.length} items (hasMore: #{has_more})"
-              results.concat(timelines)
-              page_num += 1
-            else
-              puts "   No response for page #{page_num}, stopping"
-              break
-            end
-          end
+          data['timeLines'] || []
+        else
+          []
         end
-
-        results
       end
 
       private
