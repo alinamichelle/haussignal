@@ -123,44 +123,75 @@ module Lofty
           url = "#{ENV['LOFTY_BASE_URL']}/admin/home/detail?leadId=#{lofty_lead_id}"
           Rails.logger.info "🔵 Fetching timeline via API: #{lofty_lead_id}"
           
-          page.goto(url, waitUntil: 'networkidle')
-          page.wait_for_timeout(2000)
-
-          # Use Lofty's timeline API to get complete data including note bodies
-          Rails.logger.info "🌐 Calling Lofty timeline API..."
+          # Intercept Lofty's own timeline API calls (piggyback on their auth/headers)
+          Rails.logger.info "🌐 Intercepting Lofty timeline API responses..."
           
-          timeline_data = page.evaluate(<<~JS, lofty_lead_id)
-            async (leadId) => {
-              const results = [];
-              let curPage = 0;
-              let hasMore = 1;
-
-              while (hasMore) {
-                const res = await fetch(
-                  `/api/lead-timeline-server/timeline/lead/all/filtered?curPage=${curPage}&pageSize=200&leadId=${leadId}&i18nL=en&_=${Date.now()}`,
-                  { credentials: 'include' }
-                );
-                const data = await res.json();
-                const timelines = data.data?.timeLines || [];
-                results.push(...timelines);
+          all_timelines = []
+          captured_responses = []
+          
+          # Set up response listener before navigation
+          page.on('response', ->(response) do
+            if response.request.method == 'GET' &&
+               response.url.include?('/api/lead-timeline-server/timeline/lead/all/filtered') &&
+               response.url.include?("leadId=#{lofty_lead_id}")
+              captured_responses << response
+            end
+          end)
+          
+          page.goto(url, waitUntil: 'networkidle')
+          page.wait_for_timeout(3000)
+          
+          # Process captured responses
+          captured_responses.each_with_index do |response, idx|
+            begin
+              json = JSON.parse(response.body)
+              data = json['data'] || {}
+              timelines = data['timeLines'] || []
+              
+              Rails.logger.info "📊 Response #{idx + 1}: #{timelines.length} timeline items"
+              all_timelines.concat(timelines)
+            rescue => e
+              Rails.logger.warn "⚠️ Error parsing response #{idx + 1}: #{e.message}"
+            end
+          end
+          
+          # Check if we need more pages by looking at the last response
+          if captured_responses.any?
+            last_response = captured_responses.last
+            json = JSON.parse(last_response.body)
+            data = json['data'] || {}
+            has_more = data['hasMore'].to_i == 1
+            page_num = 1
+            
+            # Trigger additional pages if needed
+            while has_more && page_num < 50
+              captured_responses.clear
+              
+              # Scroll to trigger next page
+              page.evaluate("document.querySelector('.new-time-line-list')?.scrollBy(0, 2000)")
+              page.wait_for_timeout(2000)
+              
+              # Process any new responses
+              if captured_responses.any?
+                response = captured_responses.last
+                json = JSON.parse(response.body)
+                data = json['data'] || {}
+                timelines = data['timeLines'] || []
+                has_more = data['hasMore'].to_i == 1
                 
-                hasMore = data.data?.hasMore ? 1 : 0;
-                curPage += 1;
-                
-                // Safety check to avoid infinite loop
-                if (curPage > 50) {
-                  console.log('Hit page limit, stopping');
-                  break;
-                }
-              }
+                Rails.logger.info "📊 Page #{page_num + 1}: #{timelines.length} timeline items (hasMore: #{has_more})"
+                all_timelines.concat(timelines)
+                page_num += 1
+              else
+                Rails.logger.info "No more responses, stopping pagination"
+                break
+              end
+            end
+          end
+          
+          Rails.logger.info "✅ Total timeline items collected: #{all_timelines.length}"
 
-              return results;
-            }
-          JS
-
-          Rails.logger.info "📊 Found #{timeline_data.length} timeline items from API"
-
-          timeline_data.each do |item|
+          all_timelines.each do |item|
             entries << RawTimelineEntry.new(
               lead_lofty_id: lofty_lead_id,
               event_id: item['id'],

@@ -1,5 +1,7 @@
 module Lofty
   class TimelineParser
+    include ActionView::Helpers::SanitizeHelper
+    
     # Type code mappings based on observed Lofty timeline patterns
     # These map Lofty's internal type codes to our event_type enum
     TYPE_CODE_MAPPINGS = {
@@ -75,18 +77,16 @@ module Lofty
     
     # Parse timeline data from Lofty's API JSON response
     def parse_from_json
-      require 'action_view'
-      include ActionView::Helpers::SanitizeHelper
-      
-      type_code = @raw_json['timelineType']
-      content = @raw_json['content'] || {}
-      international = @raw_json['international'] || {}
-      
-      # Extract event type from type code
-      event_type = TYPE_CODE_MAPPINGS[type_code] || :other
-      
-      # Extract full text body based on event type
-      raw_text = extract_json_body(type_code, content, international)
+      begin
+        type_code = @raw_json['timelineType']
+        content = @raw_json['content'] || {}
+        international = @raw_json['international'] || {}
+        
+        # Extract event type from type code
+        event_type = TYPE_CODE_MAPPINGS[type_code] || :other
+        
+        # Extract full text body based on event type
+        raw_text = extract_json_body(type_code, content, international)
       
       # Skip task creation events
       return nil if raw_text&.match?(/task.*was created/i)
@@ -104,8 +104,15 @@ module Lofty
         occurred_at: occurred_at,
         raw_text: raw_text,
         agent_id: nil,  # Could extract from content if needed
-        metadata: metadata
+        metadata: metadata,
+        recording_available: false,  # Could extract from content if needed
+        from_pipeline: nil,
+        to_pipeline: nil
       }
+      rescue => e
+        Rails.logger.error("parse_from_json failed: #{e.class} - #{e.message}")
+        nil
+      end
     end
     
     def extract_json_body(type_code, content, international)
