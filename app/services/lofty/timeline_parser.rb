@@ -8,6 +8,7 @@ module Lofty
       5 => :email_opened,      # Manual email opened
       6 => :email_sent,        # Manual email sent
       8 => :call,              # Call activity (lead called agent)
+      16 => :note,             # Manual note added
       25 => :call,             # Call activity (agent called lead)
       37 => :email_opened,     # Alert email opened
       38 => :other,            # Pipeline change (will be detected by pipeline_change?)
