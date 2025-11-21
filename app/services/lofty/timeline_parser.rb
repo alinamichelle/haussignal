@@ -11,6 +11,8 @@ module Lofty
       38 => :other,            # Pipeline change (will be detected by pipeline_change?)
       93 => :note,             # Lead details updated (system)
       98 => :note,             # Transaction assigned
+      103 => :email_sent,      # MIXED: Can be email OR task - requires text check
+      104 => :task,            # Task completed
       111 => :manual_unsub,    # Manual unsubscribe (agent action)
       113 => :unsub,           # Automatic unsubscribe (lead action)
       116 => :note,            # Transaction created
@@ -19,7 +21,6 @@ module Lofty
       128 => :email_sent,      # Auto email sent
       131 => :email_opened,    # Auto email opened
       169 => :note,            # Lead reassignment
-      103 => :email_sent,      # MIXED: Can be email OR task - requires text check
       21 => :note,             # Profile edited
       
       # Additional type codes will be discovered and mapped as we scrape
@@ -114,7 +115,10 @@ module Lofty
     end
 
     def task?
-      @raw_text.match?(/\b(task|reminder|follow.?up)\b/i) ||
+      # Check type code first - 104 is completed task
+      return true if @entry.type_code == 104
+      
+      @raw_text.match?(/\b(task|reminder|follow.?up|completed task)\b/i) ||
         @css_classes.any? { |c| c.match?(/task/i) }
     end
 
