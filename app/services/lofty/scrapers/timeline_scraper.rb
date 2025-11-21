@@ -161,15 +161,24 @@ module Lofty
             json = JSON.parse(last_response.body)
             data = json['data'] || {}
             has_more = data['hasMore'].to_i == 1
+            total_count = data['totalCount'] || '?'
+            puts "   Page 1 complete: #{all_timelines.length} items, hasMore=#{has_more}, totalCount=#{total_count}"
             page_num = 1
             
             # Trigger additional pages if needed
             while has_more && page_num < 50
               captured_responses.clear
+              puts "   Triggering page #{page_num + 1}..."
               
-              # Scroll to trigger next page
-              page.evaluate("document.querySelector('.new-time-line-list')?.scrollBy(0, 2000)")
-              page.wait_for_timeout(2000)
+              # Scroll timeline container to bottom to trigger lazy load
+              page.evaluate(<<~JS)
+                const container = document.querySelector('.new-time-line-list');
+                if (container) {
+                  container.scrollTop = container.scrollHeight;
+                }
+              JS
+              
+              page.wait_for_timeout(3000)  # Wait longer for API call
               
               # Process any new responses
               if captured_responses.any?
@@ -179,11 +188,11 @@ module Lofty
                 timelines = data['timeLines'] || []
                 has_more = data['hasMore'].to_i == 1
                 
-                Rails.logger.info "📊 Page #{page_num + 1}: #{timelines.length} timeline items (hasMore: #{has_more})"
+                puts "   Page #{page_num + 1}: #{timelines.length} items (hasMore: #{has_more})"
                 all_timelines.concat(timelines)
                 page_num += 1
               else
-                Rails.logger.info "No more responses, stopping pagination"
+                puts "   No more responses captured, stopping pagination"
                 break
               end
             end
