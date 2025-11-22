@@ -2,7 +2,12 @@
 
 # If running the rails server then create or migrate existing database
 if [ "${1}" == "./bin/rails" ] && [ "${2}" == "server" ]; then
-  ./bin/rails db:prepare
+  # Only run db:prepare if SECRET_KEY_BASE is set
+  if [ -n "$SECRET_KEY_BASE" ]; then
+    ./bin/rails db:prepare
+  else
+    echo "WARNING: SECRET_KEY_BASE not set, skipping db:prepare"
+  fi
 fi
 
 exec "${@}"
