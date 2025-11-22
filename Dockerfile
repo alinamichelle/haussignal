@@ -37,6 +37,16 @@ RUN bundle exec bootsnap precompile app/ lib/
 # Final stage for app image
 FROM base
 
+# Accept build arguments for environment variables
+ARG SECRET_KEY_BASE
+ARG DATABASE_URL
+ARG RAILS_ENV=production
+
+# Set them as environment variables
+ENV SECRET_KEY_BASE=${SECRET_KEY_BASE} \
+    DATABASE_URL=${DATABASE_URL} \
+    RAILS_ENV=${RAILS_ENV}
+
 # Install packages needed for deployment
 RUN apt-get update -qq && \
     apt-get install --no-install-recommends -y curl libvips postgresql-client && \
