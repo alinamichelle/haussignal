@@ -78,7 +78,4 @@ test:
 # for a full overview on how database connection configuration can be specified.
 #
 production:
-  <<: *default
-  database: haussignal_production
-  username: haussignal
-  password: <%= ENV["HAUSSIGNAL_DATABASE_PASSWORD"] %>
+  url: <%= ENV['DATABASE_URL'] %>
