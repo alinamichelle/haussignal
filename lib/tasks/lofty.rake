@@ -40,6 +40,13 @@ namespace :lofty do
       scope = scope.where("timeline_synced_at IS NULL OR timeline_synced_at < ?", 1.day.ago)
     end
 
+    # Filter by sync slot if specified (for parallel workers)
+    if ENV["SYNC_SLOT"].present?
+      slot = ENV["SYNC_SLOT"].to_i
+      scope = scope.where(sync_slot: slot)
+      puts "   Sync slot: #{slot}"
+    end
+
     total_leads = scope.count
     puts "📊 Found #{total_leads} leads to sync"
 
