@@ -9,8 +9,7 @@ namespace :lofty do
       page    = context.new_page
 
       puts "🔵 Opening Lofty login page..."
-      page.goto("#{ENV['LOFTY_BASE_URL']}/login")
-      page.wait_for_load_state('networkidle')
+      page.goto("#{ENV['LOFTY_BASE_URL']}/login", waitUntil: 'networkidle')
 
       puts "🔑 Logging in with credentials..."
       page.fill('input[name="email"]', ENV['LOFTY_LOGIN_EMAIL'])

@@ -14,8 +14,10 @@ module Lofty
       25 => :call,             # Call activity (agent called lead)
       37 => :email_opened,     # Alert email opened
       38 => :other,            # Pipeline change (will be detected by pipeline_change?)
+      87 => :call,             # Call activity (agent called lead)
       93 => :note,             # Lead details updated (system)
       98 => :note,             # Transaction assigned
+      101 => :smartplan,       # Smart plan added/action
       103 => :email_sent,      # MIXED: Can be email OR task - requires text check
       104 => :task,            # Task completed (manually)
       105 => :task,            # Task completed (automated by smart plan)
@@ -24,9 +26,11 @@ module Lofty
       116 => :note,            # Transaction created
       120 => :note,            # Property edited
       124 => :email_sent,      # Auto email sent (can be mixed with tasks)
+      125 => :sms,             # Auto text/SMS
       128 => :email_sent,      # Auto email sent
       131 => :email_opened,    # Auto email opened
       169 => :note,            # Lead reassignment
+      200 => :note,            # Profile details updated
       
       # Additional type codes will be discovered and mapped as we scrape
       # Unknown codes default to :other
@@ -242,10 +246,17 @@ module Lofty
     # =====================================================
 
     def call?
-      # Check type code first
-      return true if [8, 25].include?(@entry.type_code)
+      # Check type code first - only 8, 25, 87 are actual calls
+      return true if [8, 25, 87].include?(@entry.type_code)
       
-      @raw_text.match?(/\b(called|call|rang|phone|dialed|spoke|voicemail|answered)\b/i) ||
+      # Exclude non-call events that might contain the word "call"
+      return false if @raw_text.match?(/completed\s+task/i)  # Completed tasks
+      return false if @raw_text.match?(/\[Auto Text\]|texted/i)  # SMS/texts
+      return false if @raw_text.match?(/updated profile details/i)  # Profile updates
+      return false if @raw_text.match?(/added smart plan/i)  # Smart plans
+      
+      # Only match if it explicitly says "called" (not just contains "call")
+      @raw_text.match?(/\b(called|rang|phone|dialed|spoke|voicemail|answered)\b/i) ||
         @css_classes.any? { |c| c.match?(/call/i) } ||
         @html_content.match?(/icon.*phone|call.*icon/i)
     end
