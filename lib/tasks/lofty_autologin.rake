@@ -8,17 +8,24 @@ namespace :lofty do
       context = browser.new_context
       page    = context.new_page
 
-      puts "🔵 Opening Lofty login page..."
-      page.goto("#{ENV['LOFTY_BASE_URL']}/login", waitUntil: 'networkidle')
+      puts "🔵 Opening Lofty CRM..."
+      page.goto(ENV['LOFTY_BASE_URL'], waitUntil: 'networkidle')
+      sleep 3
 
       puts "🔑 Logging in with credentials..."
-      page.fill('input[name="email"]', ENV['LOFTY_LOGIN_EMAIL'])
-      page.fill('input[name="password"]', ENV['LOFTY_LOGIN_PASSWORD'])
-      page.click('button[type="submit"]')
+      # Try multiple possible selectors for email/username field
+      email_selector = page.locator('input[type="email"], input[name="email"], input[name="username"], input[placeholder*="email" i]').first
+      email_selector.fill(ENV['LOFTY_LOGIN_EMAIL'])
+      
+      # Try multiple possible selectors for password field
+      password_selector = page.locator('input[type="password"], input[name="password"]').first
+      password_selector.fill(ENV['LOFTY_LOGIN_PASSWORD'])
+      
+      # Try to find and click login button
+      page.locator('button[type="submit"], button:has-text("Log in"), button:has-text("Sign in")').first.click
 
       puts "⏳ Waiting for login to complete..."
-      page.wait_for_url(/crm\.lofty\.com/, timeout: 30000)
-      sleep 5 # Let page fully load
+      sleep 10 # Wait for any redirects and page load
 
       context.storage_state(path: "tmp/lofty_storage_state.json")
       puts "🟢 Saved Lofty session → tmp/lofty_storage_state.json"
