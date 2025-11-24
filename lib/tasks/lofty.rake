@@ -4,22 +4,15 @@ namespace :lofty do
     require 'playwright'
 
     Playwright.create(playwright_cli_executable_path: 'npx playwright') do |playwright|
-      browser = playwright.chromium.launch(headless: true)
+      browser = playwright.chromium.launch(headless: false)
       context = browser.new_context
       page    = context.new_page
 
       puts "🔵 Opening Lofty..."
-      page.goto("#{ENV['LOFTY_BASE_URL']}/login")
-      page.wait_for_load_state('networkidle')
+      page.goto(ENV['LOFTY_BASE_URL'])
 
-      puts "🔑 Logging in with credentials..."
-      page.fill('input[name="email"]', ENV['LOFTY_LOGIN_EMAIL'])
-      page.fill('input[name="password"]', ENV['LOFTY_LOGIN_PASSWORD'])
-      page.click('button[type="submit"]')
-
-      puts "⏳ Waiting for login to complete..."
-      page.wait_for_url(/crm\.lofty\.com/, timeout: 30000)
-      sleep 5 # Let page fully load
+      puts "🟡 Please log in manually. You have 60 seconds..."
+      sleep 60
 
       context.storage_state(path: "tmp/lofty_storage_state.json")
       puts "🟢 Saved Lofty session → tmp/lofty_storage_state.json"

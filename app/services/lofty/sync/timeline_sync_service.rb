@@ -140,25 +140,6 @@ module Lofty
           return
         end
         
-        # VALIDATION: Skip call events that don't mention the lead's name
-        if attrs[:event_type] == :call && attrs[:raw_text].present?
-          lead_mentioned = false
-          
-          if lead.first_name.present?
-            lead_mentioned ||= attrs[:raw_text].downcase.include?(lead.first_name.downcase)
-          end
-          
-          if lead.last_name.present?
-            lead_mentioned ||= attrs[:raw_text].downcase.include?(lead.last_name.downcase)
-          end
-          
-          unless lead_mentioned
-            Rails.logger.warn "  ⚠️  Skipping mismatched call event: Lead '#{lead.full_name}' not mentioned in '#{attrs[:raw_text].truncate(80)}'"
-            stats[:skipped] += 1
-            return
-          end
-        end
-
         # Create the event
         begin
           Event.create!(
