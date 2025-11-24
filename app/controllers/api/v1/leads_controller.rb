@@ -1,6 +1,75 @@
 module Api
   module V1
     class LeadsController < BaseController
+      # GET /api/v1/leads
+      # Returns paginated list of all leads with optional filters
+      def index
+        scope = Lead.includes(:agent).order(created_at: :desc)
+        
+        # Filter by agent
+        scope = scope.where(agent_id: params[:agent_id]) if params[:agent_id].present?
+        
+        # Filter by pipeline
+        scope = scope.where(pipeline: params[:pipeline]) if params[:pipeline].present?
+        
+        # Filter by source
+        scope = scope.where(source: params[:source]) if params[:source].present?
+        
+        # Filter by sync status
+        if params[:synced] == 'true'
+          scope = scope.where.not(timeline_synced_at: nil)
+        elsif params[:synced] == 'false'
+          scope = scope.where(timeline_synced_at: nil)
+        end
+        
+        # Search by name or email
+        if params[:search].present?
+          search_term = "%#{params[:search]}%"
+          scope = scope.where(
+            "full_name ILIKE ? OR email ILIKE ? OR first_name ILIKE ? OR last_name ILIKE ?",
+            search_term, search_term, search_term, search_term
+          )
+        end
+        
+        # Pagination
+        page = (params[:page] || 1).to_i
+        per_page = [(params[:per_page] || 50).to_i, 100].min # Max 100 per page
+        
+        total_count = scope.count
+        leads = scope.offset((page - 1) * per_page).limit(per_page)
+        
+        leads_data = leads.map do |lead|
+          {
+            id: lead.id,
+            loftyLeadId: lead.lofty_lead_id,
+            name: lead.full_name || [lead.first_name, lead.last_name].compact.join(' '),
+            firstName: lead.first_name,
+            lastName: lead.last_name,
+            email: lead.email,
+            phone: lead.phone,
+            source: lead.source,
+            pipeline: lead.pipeline,
+            agentName: lead.agent&.name,
+            agentId: lead.agent_id,
+            regDate: lead.reg_date,
+            timelineSynced: lead.timeline_synced_at.present?,
+            timelineSyncedAt: lead.timeline_synced_at,
+            createdAt: lead.created_at,
+            updatedAt: lead.updated_at
+          }
+        end
+        
+        render json: {
+          leads: leads_data,
+          pagination: {
+            page: page,
+            perPage: per_page,
+            totalCount: total_count,
+            totalPages: (total_count.to_f / per_page).ceil
+          }
+        }
+      end
+
       # GET /api/v1/leads/:id/profile
       # Returns complete lead profile with all events and stats
       def profile
