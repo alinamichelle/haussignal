@@ -290,7 +290,7 @@ module Lofty
             container.scroll_into_view_if_needed
           end
           
-          page.wait_for_timeout(600)
+          page.wait_for_timeout(1000)  # Increased from 600ms to allow slower loading
           
           # 3) If the load-more button is actually visible, click it
           begin
@@ -298,7 +298,7 @@ module Lofty
             if btn.count > 0 && btn.first.visible?
               puts "   🔽 Clicked load-more button..."
               btn.first.click
-              page.wait_for_timeout(2000)
+              page.wait_for_timeout(3000)  # Increased from 2000ms - load-more needs time
               stable_iterations = 0
             end
           rescue => e
