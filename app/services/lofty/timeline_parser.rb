@@ -59,30 +59,46 @@ module Lofty
     end
 
     def parse
-      # If we have JSON from API, use that (includes full note bodies, SMS, etc.)
+      # 1) JSON path (API) – keep as-is
       return parse_from_json if @raw_json.present?
-      
-      # Otherwise fall back to DOM-based parsing
-      # Skip tasks (they're not real activities, just Lofty internal tracking)
+
+      # 2) Skip internal "task was created" noise
       return nil if task_creation?(@raw_text)
 
-      # Detect activity type and parse accordingly
-      # IMPORTANT: Check emails BEFORE tasks to avoid misclassification
-      case
-      when email_sent?    then parse_email_sent
-      when email_opened?  then parse_email_opened
-      when unsub?         then parse_unsub
-      when manual_unsub?  then parse_manual_unsub
-      when task?          then parse_task
-      when call?          then parse_call
-      when sms?           then parse_sms
-      when note?          then parse_note
-      when smartplan?     then parse_smartplan
-      when pipeline_change? then parse_pipeline_change
-      when website_activity? then parse_website_activity
-      else
-        parse_unknown
+      # 3) Explicit unsub/manual unsub first (these are important)
+      return parse_unsub        if unsub?
+      return parse_manual_unsub if manual_unsub?
+
+      # 4) TYPE-CODE–DRIVEN parsing for DOM events
+      mapped = TYPE_CODE_MAPPINGS[@entry.type_code]
+
+      case mapped
+      when :email_sent
+        return parse_email_sent
+      when :email_opened
+        return parse_email_opened
+      when :sms
+        return parse_sms
+      when :call
+        return parse_call
+      when :note
+        return parse_note
+      when :smartplan
+        return parse_smartplan
+      when :task
+        return parse_task
       end
+
+      # 5) Fallback heuristics (for things that don't have a clean type code)
+      return parse_pipeline_change  if pipeline_change?
+      return parse_website_activity if website_activity?
+      return parse_task             if task?
+      return parse_call             if call?
+      return parse_sms              if sms?
+      return parse_note             if note?
+
+      # 6) Last resort
+      parse_unknown
     rescue => e
       Rails.logger.error("TimelineParser failed: #{e.class} - #{e.message}")
       Rails.logger.error("Entry: type_code=#{@entry.type_code}, text=#{@raw_text[0..100]}")
