@@ -62,14 +62,11 @@ module Lofty
       # 1) JSON path (API) – keep as-is
       return parse_from_json if @raw_json.present?
 
-      # 2) Skip internal "task was created" noise
-      return nil if task_creation?(@raw_text)
-
-      # 3) Explicit unsub/manual unsub first (these are important)
+      # 2) Explicit unsub/manual unsub first (these are important)
       return parse_unsub        if unsub?
       return parse_manual_unsub if manual_unsub?
 
-      # 4) TYPE-CODE–DRIVEN parsing for DOM events
+      # 3) TYPE-CODE–DRIVEN parsing for DOM events
       mapped = TYPE_CODE_MAPPINGS[@entry.type_code]
 
       case mapped
@@ -89,7 +86,7 @@ module Lofty
         return parse_task
       end
 
-      # 5) Fallback heuristics (for things that don't have a clean type code)
+      # 4) Fallback heuristics (for things that don't have a clean type code)
       return parse_pipeline_change  if pipeline_change?
       return parse_website_activity if website_activity?
       return parse_task             if task?
@@ -97,7 +94,7 @@ module Lofty
       return parse_sms              if sms?
       return parse_note             if note?
 
-      # 6) Last resort
+      # 5) NEVER SKIP - store everything, even if unrecognized
       parse_unknown
     rescue => e
       Rails.logger.error("TimelineParser failed: #{e.class} - #{e.message}")
@@ -587,7 +584,8 @@ module Lofty
           "activity_type" => "unknown",
           "raw_html" => @html_content,
           "css_classes" => @css_classes.join(" "),
-          "data_attributes" => @data_attributes
+          "data_attributes" => @data_attributes,
+          "full_capture" => true
         }
       }
     end

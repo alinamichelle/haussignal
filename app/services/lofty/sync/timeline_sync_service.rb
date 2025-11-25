@@ -125,7 +125,19 @@ module Lofty
 
       def process_activity(lead, entry, stats)
         # Check if this activity already exists
-        existing = Event.find_by(lofty_timeline_id: entry.event_id)
+        # Case 1: event has ID → dedupe by ID
+        if entry.event_id.present?
+          existing = Event.find_by(lofty_timeline_id: entry.event_id)
+        else
+          # Case 2: no ID → dedupe by text + timestamp + lead
+          timestamp = parse_timestamp(entry.timestamp_text)
+          existing = Event.find_by(
+            lead_id: lead.id,
+            raw_text: entry.raw_text,
+            occurred_at: timestamp
+          )
+        end
+        
         if existing
           stats[:skipped] += 1
           return
@@ -134,11 +146,7 @@ module Lofty
         # Parse the entry using TimelineParser
         attrs = Lofty::TimelineParser.parse(entry, lead: lead)
         
-        # Skip if parser returned nil (invalid entry or task creation)
-        if attrs.nil?
-          stats[:skipped] += 1
-          return
-        end
+        # Parser now NEVER returns nil - all events are captured
         
         # Create the event
         begin
