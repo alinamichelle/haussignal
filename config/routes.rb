@@ -16,6 +16,10 @@ Rails.application.routes.draw do
   # API v1 - Unsubscribe Intelligence Dashboard
   namespace :api do
     namespace :v1 do
+      # Auth endpoints
+      post 'auth/login', to: 'auth#login'
+      get 'auth/me', to: 'auth#me'
+      
       # Unsub endpoints
       get 'unsubs/summary', to: 'unsubs#summary'
       get 'unsubs/series', to: 'unsubs#series'

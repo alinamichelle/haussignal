@@ -1,7 +1,46 @@
 module Api
   module V1
     class BaseController < ActionController::API
+      # Skip auth by default - controllers opt-in
+      # before_action :authenticate_user!
+
+      attr_reader :current_user
+
       private
+
+      # Extract and validate JWT from Authorization header
+      def authenticate_user!
+        header = request.headers['Authorization']
+        token = header.split(' ').last if header
+        
+        if token
+          decoded = JsonWebToken.decode(token)
+          if decoded
+            @current_user = User.find_by(id: decoded[:user_id])
+            unless @current_user&.active?
+              render json: { error: 'Unauthorized' }, status: :unauthorized
+            end
+          else
+            render json: { error: 'Invalid token' }, status: :unauthorized
+          end
+        else
+          render json: { error: 'Missing token' }, status: :unauthorized
+        end
+      end
+
+      # Require admin role
+      def require_admin!
+        unless @current_user&.admin?
+          render json: { error: 'Forbidden - Admin access required' }, status: :forbidden
+        end
+      end
+
+      # Require admin or agent role
+      def require_admin_or_agent!
+        unless @current_user&.admin? || @current_user&.agent?
+          render json: { error: 'Forbidden - Agent access required' }, status: :forbidden
+        end
+      end
 
       # Parse date range from request params
       # Returns a time range that can be used with occurred_at filtering
