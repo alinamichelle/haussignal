@@ -266,9 +266,9 @@ module Lofty
         
         last_count = 0
         stable_iterations = 0
-        max_stable = 15  # "no new items" loops before we give up
+        max_stable = 30  # "no new items" loops before we give up (increased for large timelines)
         
-        1.upto(200) do |i|
+        1.upto(500) do |i|
           count = items.count
           
           if count > last_count
