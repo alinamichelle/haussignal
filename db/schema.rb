@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2025_11_26_053000) do
+ActiveRecord::Schema[7.1].define(version: 2025_11_26_143938) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -53,12 +53,19 @@ ActiveRecord::Schema[7.1].define(version: 2025_11_26_053000) do
     t.string "smart_plan_step_kind"
     t.string "profile_change_type"
     t.index "((metadata ->> 'campaign_id'::text))", name: "index_events_on_campaign_id"
+    t.index ["agent_id", "category"], name: "index_events_on_agent_category"
     t.index ["agent_id"], name: "index_events_on_agent_id"
     t.index ["auto"], name: "index_events_on_auto"
+    t.index ["auto"], name: "index_events_on_auto_only"
     t.index ["category", "channel"], name: "index_events_on_category_and_channel"
+    t.index ["category", "occurred_at"], name: "index_events_on_category_occurred_at"
     t.index ["category"], name: "index_events_on_category"
+    t.index ["category"], name: "index_events_on_category_only"
     t.index ["channel"], name: "index_events_on_channel"
+    t.index ["channel"], name: "index_events_on_channel_only"
     t.index ["event_type"], name: "index_events_on_event_type"
+    t.index ["lead_id", "auto"], name: "index_events_on_lead_auto"
+    t.index ["lead_id", "category"], name: "index_events_on_lead_category"
     t.index ["lead_id"], name: "index_events_on_lead_id"
     t.index ["lofty_timeline_id"], name: "index_events_on_lofty_timeline_id", unique: true
     t.index ["occurred_at"], name: "index_events_on_occurred_at"
