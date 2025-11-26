@@ -3,6 +3,8 @@
 # Generates HausSignals based on event patterns and lead behavior
 # Run via: GenerateHausSignals.run
 class GenerateHausSignals
+  BATCH_SIZE = 1_000
+
   def self.run
     new.run
   end
@@ -38,28 +40,28 @@ class GenerateHausSignals
   def generate_new_lead_no_human
     puts "\n🌱 Generating 'new_lead_no_human' signals..."
     
-    # Find leads created in last 48 hours
-    new_leads = Lead.where('created_at >= ?', 48.hours.ago)
-    
+    # Batch: Get IDs first, then process in chunks
+    lead_ids = Lead.where('created_at >= ?', 48.hours.ago).pluck(:id)
     count = 0
-    new_leads.find_each do |lead|
-      # Check if they have any events
-      total_events = lead.events.count
-      next if total_events.zero?
+    
+    lead_ids.each_slice(BATCH_SIZE) do |ids|
+      leads = Lead.where(id: ids).includes(:events)
       
-      # Check if they have any manual events
-      manual_events = lead.events.manual.count
-      
-      # If they have events but NO manual events, create signal
-      if manual_events.zero?
+      leads.each do |lead|
+        events = lead.events.where('occurred_at >= ?', lead.created_at)
+        next if events.blank?
+        
+        manual_count = events.count { |e| !e.auto }
+        next unless manual_count.zero?
+        
         upsert_signal(
           lead: lead,
           signal_type: 'new_lead_no_human',
           severity: 'high',
           metadata: {
-            days_old: (Time.current - lead.created_at) / 1.day,
-            total_events: total_events,
-            auto_events: lead.events.auto.count
+            days_old: ((Time.current - lead.created_at) / 1.day).round(1),
+            total_events: events.size,
+            auto_events: events.count { |e| e.auto }
           }
         )
         count += 1
@@ -76,30 +78,32 @@ class GenerateHausSignals
   def generate_automation_only
     puts "\n🤖 Generating 'automation_only_sequence' signals..."
     
+    cutoff = 7.days.ago
     count = 0
     
-    # Find leads with events in last 7 days
-    Lead.joins(:events)
-        .where('events.occurred_at >= ?', 7.days.ago)
-        .distinct
-        .find_each do |lead|
+    # Batch: Get lead IDs with recent events
+    lead_ids = Event.where('occurred_at >= ?', cutoff).distinct.pluck(:lead_id)
+    
+    lead_ids.each_slice(BATCH_SIZE) do |ids|
+      leads = Lead.where(id: ids).includes(:events)
       
-      recent_events = lead.events.where('occurred_at >= ?', 7.days.ago)
-      manual_count = recent_events.manual.count
-      auto_count = recent_events.auto.count
-      
-      # Only auto events in the window
-      if auto_count > 0 && manual_count.zero?
-        last_manual = lead.events.manual.order(occurred_at: :desc).first
-        days_since_manual = last_manual ? (Time.current - last_manual.occurred_at) / 1.day : nil
+      leads.each do |lead|
+        window_events = lead.events.select { |e| e.occurred_at >= cutoff }
+        next if window_events.blank?
+        
+        manual_count = window_events.count { |e| !e.auto }
+        next unless manual_count.zero?
+        
+        auto_events = window_events.select { |e| e.auto }
+        last_manual = lead.events.reject(&:auto).max_by(&:occurred_at)
         
         upsert_signal(
           lead: lead,
           signal_type: 'automation_only_sequence',
           severity: 'medium',
           metadata: {
-            auto_events_last_7_days: auto_count,
-            days_since_last_manual: days_since_manual&.round(1),
+            auto_events_last_7_days: auto_events.size,
+            days_since_last_manual: last_manual ? ((Time.current - last_manual.occurred_at) / 1.day).round(1) : nil,
             last_manual_event_at: last_manual&.occurred_at
           }
         )
@@ -117,41 +121,44 @@ class GenerateHausSignals
   def generate_warming_up
     puts "\n🔥 Generating 'warming_up_activity' signals..."
     
+    cutoff = 3.days.ago
     count = 0
     
-    # Find leads with recent website or email engagement
-    Lead.joins(:events)
-        .merge(Event.where(channel: ['email', 'website']))
-        .where('events.occurred_at >= ?', 3.days.ago)
-        .distinct
-        .find_each do |lead|
+    # Batch: Get lead IDs with email/website activity
+    lead_ids = Event.where('occurred_at >= ?', cutoff)
+                    .where(channel: ['email', 'website'])
+                    .distinct
+                    .pluck(:lead_id)
+    
+    lead_ids.each_slice(BATCH_SIZE) do |ids|
+      leads = Lead.where(id: ids).includes(:events)
       
-      recent_engagement = lead.events
-                              .where(channel: ['email', 'website'])
-                              .where('occurred_at >= ?', 3.days.ago)
-      
-      # Need at least 2 engagement events
-      if recent_engagement.count >= 2
-        last_manual = lead.events.manual_communication
-                          .where('occurred_at >= ?', 3.days.ago)
-                          .order(occurred_at: :desc)
-                          .first
-        
-        # Only flag if no recent manual outreach
-        if last_manual.nil?
-          upsert_signal(
-            lead: lead,
-            signal_type: 'warming_up_activity',
-            severity: 'medium',
-            metadata: {
-              engagement_events_count: recent_engagement.count,
-              email_opens: recent_engagement.email.count,
-              website_visits: recent_engagement.website.count,
-              last_engagement_at: recent_engagement.maximum(:occurred_at)
-            }
-          )
-          count += 1
+      leads.each do |lead|
+        engagement_events = lead.events.select do |e|
+          e.occurred_at >= cutoff && ['email', 'website'].include?(e.channel)
         end
+        
+        next if engagement_events.size < 2
+        
+        # Check for recent manual communication
+        recent_manual = lead.events.any? do |e|
+          e.occurred_at >= cutoff && e.category == 'communication' && !e.auto
+        end
+        
+        next if recent_manual
+        
+        upsert_signal(
+          lead: lead,
+          signal_type: 'warming_up_activity',
+          severity: 'medium',
+          metadata: {
+            engagement_events_count: engagement_events.size,
+            email_opens: engagement_events.count { |e| e.channel == 'email' },
+            website_visits: engagement_events.count { |e| e.channel == 'website' },
+            last_engagement_at: engagement_events.map(&:occurred_at).max
+          }
+        )
+        count += 1
       end
     end
     
@@ -165,28 +172,32 @@ class GenerateHausSignals
   def generate_idle_clients
     puts "\n🕰 Generating 'idle_client' signals..."
     
+    cutoff = 90.days.ago
     count = 0
     
-    # Find leads where most recent event is >90 days old
-    Lead.joins(:events)
-        .group('leads.id')
-        .having('MAX(events.occurred_at) < ?', 90.days.ago)
-        .find_each do |lead|
+    # Batch: Get lead IDs where max event date < cutoff
+    lead_ids = Event.group(:lead_id)
+                    .having('MAX(occurred_at) < ?', cutoff)
+                    .pluck(:lead_id)
+    
+    lead_ids.each_slice(BATCH_SIZE) do |ids|
+      leads = Lead.where(id: ids)
       
-      last_event = lead.events.order(occurred_at: :desc).first
-      days_idle = last_event ? (Time.current - last_event.occurred_at) / 1.day : nil
-      
-      upsert_signal(
-        lead: lead,
-        signal_type: 'idle_client',
-        severity: 'medium',
-        metadata: {
-          days_since_last_activity: days_idle&.round(0),
-          last_event_at: last_event&.occurred_at,
-          last_event_type: last_event&.event_type
-        }
-      )
-      count += 1
+      leads.each do |lead|
+        last_event_at = Event.where(lead_id: lead.id).maximum(:occurred_at)
+        next unless last_event_at && last_event_at < cutoff
+        
+        upsert_signal(
+          lead: lead,
+          signal_type: 'idle_client',
+          severity: 'medium',
+          metadata: {
+            days_since_last_activity: ((Time.current - last_event_at) / 1.day).round(0),
+            last_event_at: last_event_at
+          }
+        )
+        count += 1
+      end
     end
     
     puts "  → Created/updated #{count} signals"

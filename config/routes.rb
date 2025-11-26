@@ -34,6 +34,12 @@ Rails.application.routes.draw do
       # Analytics endpoints
       get 'analytics/overview', to: 'analytics#overview'
 
+      # Signals endpoints
+      resources :agents, only: [] do
+        resources :signals, only: [:index], controller: 'signals'
+      end
+      get 'signals/stats', to: 'signals#stats'
+
     end
   end
 end
