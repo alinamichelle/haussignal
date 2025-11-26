@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2025_11_26_143938) do
+ActiveRecord::Schema[7.1].define(version: 2025_11_26_150957) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -71,6 +71,25 @@ ActiveRecord::Schema[7.1].define(version: 2025_11_26_143938) do
     t.index ["occurred_at"], name: "index_events_on_occurred_at"
   end
 
+  create_table "haus_signals", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "lead_id", null: false
+    t.uuid "agent_id"
+    t.string "signal_type", null: false
+    t.string "severity", default: "medium", null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "first_detected_at", null: false
+    t.datetime "last_seen_at", null: false
+    t.string "status", default: "active", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["agent_id", "signal_type"], name: "index_haus_signals_on_agent_id_and_signal_type"
+    t.index ["agent_id"], name: "index_haus_signals_on_agent_id"
+    t.index ["lead_id", "signal_type"], name: "index_haus_signals_on_lead_id_and_signal_type", unique: true
+    t.index ["lead_id"], name: "index_haus_signals_on_lead_id"
+    t.index ["severity"], name: "index_haus_signals_on_severity"
+    t.index ["status"], name: "index_haus_signals_on_status"
+  end
+
   create_table "leads", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.string "org_id", default: "realty-haus", null: false
     t.string "lofty_lead_id", null: false
@@ -113,5 +132,7 @@ ActiveRecord::Schema[7.1].define(version: 2025_11_26_143938) do
 
   add_foreign_key "events", "agents"
   add_foreign_key "events", "leads"
+  add_foreign_key "haus_signals", "agents"
+  add_foreign_key "haus_signals", "leads"
   add_foreign_key "leads", "agents"
 end
