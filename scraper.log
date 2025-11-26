@@ -1,0 +1,15 @@
+🚀 Starting Lofty timeline sync
+   Mode: INCREMENTAL
+   Batch size: 50
+
+📊 Found 2434 leads to sync
+
+⚠️  This will scrape 2434 leads. Continue? (y/n): 
+🔄 Starting sync...
+bin/rails aborted!
+SyntaxError: /Users/alinavillarreal/Projects/haussignal/app/services/lofty/sync/timeline_sync_service.rb:86: dynamic constant assignment (SyntaxError)
+        SKIP_LEADS = ['1139313628539303']
+        ^~~~~~~~~~
+/Users/alinavillarreal/Projects/haussignal/lib/tasks/lofty.rake:68:in `block (2 levels) in <main>'
+Tasks: TOP => lofty:sync_timelines
+(See full trace by running task with --trace)

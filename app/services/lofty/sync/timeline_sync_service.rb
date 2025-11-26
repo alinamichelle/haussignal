@@ -1,6 +1,9 @@
 module Lofty
   module Sync
     class TimelineSyncService
+      # Skip list for problematic leads that cause infinite loops
+      SKIP_LEADS = ['1139313628539303'].freeze
+      
       def initialize
         @scraper = Lofty::Scrapers::TimelineScraper.new
       end
@@ -82,10 +85,7 @@ module Lofty
       def sync_for_multiple_leads(lofty_lead_ids, incremental: true)
         Rails.logger.info "🔄 Syncing ALL activities for #{lofty_lead_ids.length} leads (incremental: #{incremental})"
         
-        # Skip list for problematic leads that cause infinite loops
-        SKIP_LEADS = ['1139313628539303']
-        
-        total_stats = { 
+        total_stats = {
           email_sent: 0, email_opened: 0, sms: 0, call: 0, 
           note: 0, smartplan: 0, alert_view: 0, unsub: 0, 
           manual_unsub: 0, other: 0, skipped: 0, errors: 0,
