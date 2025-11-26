@@ -513,6 +513,15 @@ module Lofty
         source:              'lofty'
       },
 
+      72  => {
+        event_type:          :lead_added_open_house,
+        category:            :profile,
+        profile_change_type: :source_update,
+        channel:             :system,
+        auto:                false,
+        source:              'lofty'
+      },
+
       93  => {
         event_type:          :contact_info_updated,
         category:            :profile,
