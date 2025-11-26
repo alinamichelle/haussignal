@@ -82,6 +82,9 @@ module Lofty
       def sync_for_multiple_leads(lofty_lead_ids, incremental: true)
         Rails.logger.info "🔄 Syncing ALL activities for #{lofty_lead_ids.length} leads (incremental: #{incremental})"
         
+        # Skip list for problematic leads that cause infinite loops
+        SKIP_LEADS = ['1139313628539303']
+        
         total_stats = { 
           email_sent: 0, email_opened: 0, sms: 0, call: 0, 
           note: 0, smartplan: 0, alert_view: 0, unsub: 0, 
@@ -90,6 +93,12 @@ module Lofty
         }
 
         lofty_lead_ids.each_with_index do |lofty_lead_id, index|
+          # Skip problematic leads
+          if SKIP_LEADS.include?(lofty_lead_id.to_s)
+            Rails.logger.warn "\n⚠️  [#{index + 1}/#{lofty_lead_ids.length}] Skipping problematic lead: #{lofty_lead_id}"
+            total_stats[:leads_failed] += 1
+            next
+          end
           begin
             Rails.logger.info "\n📍 [#{index + 1}/#{lofty_lead_ids.length}] Processing lead: #{lofty_lead_id}"
             
