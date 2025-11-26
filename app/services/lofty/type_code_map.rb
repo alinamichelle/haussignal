@@ -97,6 +97,16 @@ module Lofty
         source:             'lofty'
       },
 
+      186 => {
+        event_type:         :sms_sent_group,
+        category:           :communication,
+        communication_kind: :manual,
+        channel:            :sms,
+        auto:               false,
+        direction:          :outbound,
+        source:             'lofty'
+      },
+
       126 => {
         event_type:         :ai_question_asked,
         category:           :communication,
@@ -283,6 +293,42 @@ module Lofty
         source:         'lofty'
       },
 
+      47  => {
+        event_type:     :home_evaluation_requested,
+        category:       :marketing,
+        marketing_kind: :engagement,
+        channel:        :website,
+        auto:           true,
+        source:         'lofty'
+      },
+
+      91  => {
+        event_type:     :market_report_scheduled,
+        category:       :marketing,
+        marketing_kind: :outbound,
+        channel:        :system,
+        auto:           false,
+        source:         'lofty'
+      },
+
+      160 => {
+        event_type:     :cma_report_requested_website,
+        category:       :marketing,
+        marketing_kind: :engagement,
+        channel:        :website,
+        auto:           true,
+        source:         'lofty'
+      },
+
+      162 => {
+        event_type:     :cma_report_requested_home_report,
+        category:       :marketing,
+        marketing_kind: :engagement,
+        channel:        :website,
+        auto:           true,
+        source:         'lofty'
+      },
+
       11  => {
         handler: :handle_11
       },
@@ -333,6 +379,15 @@ module Lofty
         task_origin:  :smart_plan,
         channel:      :system,
         auto:         true,
+        source:       'lofty'
+      },
+
+      41  => {
+        event_type:   :showing_request_deleted,
+        category:     :task,
+        task_origin:  :ad_hoc,
+        channel:      :system,
+        auto:         false,
         source:       'lofty'
       },
 
