@@ -59,48 +59,98 @@ module Lofty
     end
 
     def parse
-      # 1) JSON path (API) – keep as-is
-      return parse_from_json if @raw_json.present?
+      # 1) JSON path (API) – keep as-is, but classify
+      if @raw_json.present?
+        base = parse_from_json
+        return nil if base.nil?
+        return base.merge(classify_canonical(base))
+      end
 
       # 2) Explicit unsub/manual unsub first (these are important)
-      return parse_unsub        if unsub?
-      return parse_manual_unsub if manual_unsub?
+      if unsub?
+        base = parse_unsub
+        return base.merge(classify_canonical(base))
+      end
+      
+      if manual_unsub?
+        base = parse_manual_unsub
+        return base.merge(classify_canonical(base))
+      end
 
       # 3) TYPE-CODE–DRIVEN parsing for DOM events
       mapped = TYPE_CODE_MAPPINGS[@entry.type_code]
 
       case mapped
       when :email_sent
-        return parse_email_sent
+        base = parse_email_sent
+        return base.merge(classify_canonical(base))
       when :email_opened
-        return parse_email_opened
+        base = parse_email_opened
+        return base.merge(classify_canonical(base))
       when :sms
-        return parse_sms
+        base = parse_sms
+        return base.merge(classify_canonical(base))
       when :call
-        return parse_call
+        base = parse_call
+        return base.merge(classify_canonical(base))
       when :note
-        return parse_note
+        base = parse_note
+        return base.merge(classify_canonical(base))
       when :smartplan
-        return parse_smartplan
+        base = parse_smartplan
+        return base.merge(classify_canonical(base))
       when :task
-        return parse_task
+        base = parse_task
+        return base.merge(classify_canonical(base))
       end
 
       # 4) Fallback heuristics (for things that don't have a clean type code)
-      return parse_pipeline_change  if pipeline_change?
-      return parse_website_activity if website_activity?
-      return parse_task             if task?
-      return parse_call             if call?
-      return parse_sms              if sms?
-      return parse_note             if note?
+      if pipeline_change?
+        base = parse_pipeline_change
+        return base.merge(classify_canonical(base))
+      end
+      
+      if website_activity?
+        base = parse_website_activity
+        return base.merge(classify_canonical(base))
+      end
+      
+      if task?
+        base = parse_task
+        return base.merge(classify_canonical(base))
+      end
+      
+      if call?
+        base = parse_call
+        return base.merge(classify_canonical(base))
+      end
+      
+      if sms?
+        base = parse_sms
+        return base.merge(classify_canonical(base))
+      end
+      
+      if note?
+        base = parse_note
+        return base.merge(classify_canonical(base))
+      end
 
       # 5) NEVER SKIP - store everything, even if unrecognized
-      parse_unknown
+      base = parse_unknown
+      base.merge(classify_canonical(base))
     rescue => e
       Rails.logger.error("TimelineParser failed: #{e.class} - #{e.message}")
       Rails.logger.error("Entry: type_code=#{@entry.type_code}, text=#{@raw_text[0..100]}")
       Rails.logger.error("HTML: #{@html_content[0..500]}")
       nil
+    end
+    
+    def classify_canonical(parsed_event)
+      Lofty::CanonicalClassifier.classify(
+        type_code: @entry.type_code,
+        raw_text: @raw_text,
+        parsed_event: parsed_event
+      )
     end
     
     # Parse timeline data from Lofty's API JSON response

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2025_11_21_004351) do
+ActiveRecord::Schema[7.1].define(version: 2025_11_26_053000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pgcrypto"
   enable_extension "plpgsql"
@@ -43,8 +43,21 @@ ActiveRecord::Schema[7.1].define(version: 2025_11_21_004351) do
     t.string "from_pipeline"
     t.string "to_pipeline"
     t.boolean "recording_available", default: false
+    t.string "category"
+    t.string "channel"
+    t.boolean "auto", default: false, null: false
+    t.string "direction"
+    t.string "marketing_kind"
+    t.string "communication_kind"
+    t.string "task_origin"
+    t.string "smart_plan_step_kind"
+    t.string "profile_change_type"
     t.index "((metadata ->> 'campaign_id'::text))", name: "index_events_on_campaign_id"
     t.index ["agent_id"], name: "index_events_on_agent_id"
+    t.index ["auto"], name: "index_events_on_auto"
+    t.index ["category", "channel"], name: "index_events_on_category_and_channel"
+    t.index ["category"], name: "index_events_on_category"
+    t.index ["channel"], name: "index_events_on_channel"
     t.index ["event_type"], name: "index_events_on_event_type"
     t.index ["lead_id"], name: "index_events_on_lead_id"
     t.index ["lofty_timeline_id"], name: "index_events_on_lofty_timeline_id", unique: true
@@ -74,9 +87,21 @@ ActiveRecord::Schema[7.1].define(version: 2025_11_21_004351) do
     t.string "lead_type"
     t.text "notes"
     t.datetime "timeline_synced_at"
+    t.integer "sync_slot"
     t.index ["agent_id"], name: "index_leads_on_agent_id"
     t.index ["lofty_lead_id"], name: "index_leads_on_lofty_lead_id", unique: true
     t.index ["timeline_synced_at"], name: "index_leads_on_timeline_synced_at"
+  end
+
+  create_table "users", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "email", null: false
+    t.string "password_digest", null: false
+    t.integer "role", default: 2, null: false
+    t.string "name", null: false
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["email"], name: "index_users_on_email", unique: true
   end
 
   add_foreign_key "events", "agents"
