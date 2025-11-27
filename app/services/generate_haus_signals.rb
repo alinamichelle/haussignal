@@ -249,22 +249,43 @@ class GenerateHausSignals
   # =====================================================
   def upsert_signal(lead:, signal_type:, severity:, metadata: {})
     now = Time.current
-    
+
+    # Add standardized metadata fields
+    enriched_metadata = enrich_metadata(lead, metadata)
+
     # Find or initialize by lead + signal_type (unique constraint)
     signal = HausSignal.find_or_initialize_by(
       lead_id: lead.id,
       signal_type: signal_type
     )
-    
+
     signal.assign_attributes(
       agent_id: lead.agent_id, # Can be nil
       severity: severity,
-      metadata: metadata,
+      metadata: enriched_metadata,
       first_detected_at: signal.first_detected_at || now,
       last_seen_at: now,
       status: 'active'
     )
-    
+
     signal.save!
+  end
+
+  def enrich_metadata(lead, base_metadata)
+    now = Time.current
+
+    # Find last manual and any events
+    last_manual_event = lead.events.where(auto: false).order(occurred_at: :desc).first
+    last_any_event = lead.events.order(occurred_at: :desc).first
+
+    enriched = base_metadata.dup
+
+    # Add standardized fields
+    enriched[:last_manual_at] = last_manual_event&.occurred_at&.iso8601
+    enriched[:last_any_at] = last_any_event&.occurred_at&.iso8601
+    enriched[:days_since_manual] = last_manual_event ? ((now - last_manual_event.occurred_at) / 1.day).round(0) : nil
+    enriched[:days_since_any] = last_any_event ? ((now - last_any_event.occurred_at) / 1.day).round(0) : nil
+
+    enriched
   end
 end

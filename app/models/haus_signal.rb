@@ -85,7 +85,42 @@ class HausSignal < ApplicationRecord
   end
 
   def ui_description
-    SIGNAL_DEFINITIONS.dig(signal_type, :description) || ''
+    case signal_type
+    when 'new_lead_no_human'
+      days = metadata['days_old']
+      "New lead (#{days} days old) with no human touches"
+    when 'automation_only_sequence'
+      auto_count = metadata['auto_events_last_7_days'] || 0
+      days = metadata['days_since_last_manual']
+      if days
+        "#{auto_count} auto touches, 0 manual in #{days.round(0)} days"
+      else
+        "#{auto_count} auto touches, no manual touches yet"
+      end
+    when 'warming_up_activity'
+      email_count = metadata['email_opens'] || 0
+      website_count = metadata['website_visits'] || 0
+      "#{email_count + website_count} engagement events in 3 days"
+    when 'idle_client'
+      days = metadata['days_since_last_activity'] || 0
+      "No touches in #{days} days"
+    when 'overdue_tasks'
+      task_count = metadata['overdue_task_count'] || 1
+      oldest_days = metadata['oldest_overdue_days'] || 0
+      "#{task_count} overdue task#{task_count == 1 ? '' : 's'} (#{oldest_days} days old)"
+    when 'unreviewed_replies'
+      days = metadata['days_since_inbound'] || 0
+      "Inbound reply #{days} days ago, no human follow-up"
+    when 'no_next_step'
+      days = metadata['days_since_last_manual']
+      if days
+        "Manual touch #{days.round(0)} days ago, no next step"
+      else
+        "Recent manual touch, no next step scheduled"
+      end
+    else
+      SIGNAL_DEFINITIONS.dig(signal_type, :description) || ''
+    end
   end
 
   def ui_icon
