@@ -3,17 +3,17 @@
 one:
   lead: one
   agent: one
-  signal_type: MyString
-  severity: MyString
-  metadata: 
+  signal_type: test_signal
+  severity: low
+  metadata: "{}"
   first_detected_at: 2025-11-26 09:09:57
   last_seen_at: 2025-11-26 09:09:57
 
 two:
   lead: two
   agent: two
-  signal_type: MyString
-  severity: MyString
-  metadata: 
+  signal_type: test_signal
+  severity: medium
+  metadata: "{}"
   first_detected_at: 2025-11-26 09:09:57
   last_seen_at: 2025-11-26 09:09:57

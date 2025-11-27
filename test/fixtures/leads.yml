@@ -1,0 +1,11 @@
+one:
+  id: aa67c98c-d81f-5a9c-b0bc-26caa0051aea
+  lofty_lead_id: "123456"
+  org_id: test-org
+  agent: one
+
+two:
+  id: bb67c98c-d81f-5a9c-b0bc-26caa0051aeb
+  lofty_lead_id: "789012"
+  org_id: test-org
+  agent: two

@@ -54,6 +54,26 @@ namespace :signals do
     
     puts ""
     puts "=" * 80
+
+    # Validate signal health
+    validate_signal_health
+  end
+
+  # Signal health monitoring helper
+  def validate_signal_health
+    active = HausSignal.where(status: "active")
+
+    total = active.count
+    puts "Active signals: #{total}"
+
+    if total.zero?
+      puts "WARN: Zero active signals – check generator / scheduling."
+    elsif total > 10_000
+      puts "WARN: Abnormally high signal count (#{total}) – may be spammy."
+    end
+
+    by_severity = active.group(:severity).count
+    puts "By severity: #{by_severity.inspect}"
   end
 
   desc "Clear all inactive signals older than 30 days"

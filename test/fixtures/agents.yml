@@ -1,0 +1,9 @@
+one:
+  id: aa67c98c-d81f-5a9c-b0bc-26caa0051aea
+  name: Test Agent
+  email: test@example.com
+
+two:
+  id: bb67c98c-d81f-5a9c-b0bc-26caa0051aeb
+  name: Test Agent Two
+  email: test2@example.com

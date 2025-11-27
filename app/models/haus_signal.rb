@@ -15,9 +15,24 @@ class HausSignal < ApplicationRecord
     dismissed: 'dismissed'
   }, validate: true
 
-  validates :signal_type, presence: true
+  ALLOWED_SIGNAL_TYPES = %w[
+    new_lead_no_human
+    automation_only_sequence
+    warming_up_activity
+    idle_client
+    no_next_step
+    overdue_tasks
+    unreviewed_replies
+  ].freeze
+
+  validates :severity, inclusion: { in: %w[low medium high] }
+  validates :signal_type, inclusion: { in: ALLOWED_SIGNAL_TYPES }
+  validate :ensure_metadata_exists
   validates :first_detected_at, presence: true
   validates :last_seen_at, presence: true
+
+  before_validation :ensure_metadata_hash
+  after_initialize :set_default_metadata
 
   scope :for_agent, ->(agent_id) { where(agent_id: agent_id) }
   scope :active, -> { where(status: 'active') }
@@ -73,6 +88,12 @@ class HausSignal < ApplicationRecord
       description: "You recently spoke with this contact, but there's no next task scheduled.",
       default_severity: 'medium',
       icon: '🧭'
+    },
+    'unreviewed_replies' => {
+      label: 'Unreviewed Replies',
+      description: 'This contact replied but has not received a human response or follow-up task.',
+      default_severity: 'medium',
+      icon: '💬'
     }
   }.freeze
 
@@ -94,5 +115,19 @@ class HausSignal < ApplicationRecord
 
   def default_severity_for_type
     SIGNAL_DEFINITIONS.dig(signal_type, :default_severity) || 'medium'
+  end
+
+  private
+
+  def ensure_metadata_hash
+    self.metadata = {} if metadata.nil?
+  end
+
+  def set_default_metadata
+    self.metadata ||= {} if new_record?
+  end
+
+  def ensure_metadata_exists
+    errors.add(:metadata, "must be present") if metadata.nil?
   end
 end

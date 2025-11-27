@@ -20,6 +20,8 @@ class GenerateHausSignals
     generate_warming_up
     generate_idle_clients
     generate_no_next_step
+    generate_overdue_tasks
+    generate_unreviewed_replies
     
     elapsed = Time.current - start_time
     total_signals = HausSignal.active.count
@@ -241,6 +243,140 @@ class GenerateHausSignals
       end
     end
     
+    puts "  → Created/updated #{count} signals"
+  end
+
+  # =====================================================
+  # SIGNAL 6: OVERDUE TASKS
+  # Pending/unknown tasks that are old and may need attention
+  # =====================================================
+  def generate_overdue_tasks
+    puts "\n⏰ Generating 'overdue_tasks' signals..."
+
+    cutoff = Time.current
+    count = 0
+
+    # Find leads with pending or unknown tasks that are old
+    leads_with_old_tasks = Lead.joins(:events)
+                              .merge(Event.where(event_type: 'task'))
+                              .merge(Event.where("metadata->>'task_status' IN ('pending', 'unknown')"))
+                              .distinct
+
+    leads_with_old_tasks.find_each do |lead|
+      # Get pending/unknown tasks for this lead
+      old_tasks = lead.events.where(event_type: 'task')
+                             .where("metadata->>'task_status' IN ('pending', 'unknown')")
+                             .where('occurred_at < ?', cutoff)
+
+      next if old_tasks.empty?
+
+      # Find the oldest pending task
+      oldest_task = old_tasks.order(:occurred_at).first
+      hours_old = ((cutoff - oldest_task.occurred_at) / 1.hour).floor
+
+      # Skip if not old enough (less than 12 hours)
+      next if hours_old < 12
+
+      # Determine severity based on age
+      severity = if hours_old > 48 * 24  # 48 days
+                   'high'
+                 elsif hours_old > 24 * 24  # 24 days
+                   'medium'
+                 elsif hours_old > 12 * 24  # 12 days
+                   'low'
+                 else
+                   next # Less than 12 days, skip
+                 end
+
+      upsert_signal(
+        lead: lead,
+        signal_type: 'overdue_tasks',
+        severity: severity,
+        metadata: {
+          oldest_task_id: oldest_task.id,
+          task_title: oldest_task.metadata['task_title'] || oldest_task.raw_text&.truncate(100),
+          task_occurred_at: oldest_task.occurred_at,
+          hours_old: hours_old,
+          pending_task_count: old_tasks.count
+        }
+      )
+      count += 1
+    end
+
+    puts "  → Created/updated #{count} signals"
+  end
+
+  # =====================================================
+  # SIGNAL 7: UNREVIEWED REPLIES
+  # Leads who replied but didn't get human response or follow-up task
+  # =====================================================
+  def generate_unreviewed_replies
+    puts "\n💬 Generating 'unreviewed_replies' signals..."
+
+    cutoff = Time.current
+    lookback = 1.week.ago
+    window = 2.hours
+    count = 0
+
+    # Find leads with recent inbound communication
+    inbound_events = Event.where(category: 'communication', direction: 'inbound')
+                         .where('occurred_at BETWEEN ? AND ?', lookback, cutoff)
+                         .includes(:lead)
+
+    # Group by lead_id and get the latest inbound per lead
+    latest_inbound_by_lead = inbound_events.group_by(&:lead_id)
+                                          .transform_values { |events| events.max_by(&:occurred_at) }
+
+    latest_inbound_by_lead.each do |lead_id, inbound_event|
+      next unless lead_id && inbound_event
+      next if cutoff - inbound_event.occurred_at > window
+
+      lead = inbound_event.lead
+      next unless lead
+
+      inbound_time = inbound_event.occurred_at
+
+      # Check for manual outbound communication since this inbound
+      manual_outbound_exists = Event.where(lead_id: lead_id)
+                                   .where(category: 'communication', direction: 'outbound')
+                                   .where("metadata->>'communication_kind' = ? OR auto = ?", 'manual', false)
+                                   .where('occurred_at > ?', inbound_time)
+                                   .exists?
+
+      next if manual_outbound_exists
+
+      # Check for tasks created since this inbound
+      followup_task_exists = Event.where(lead_id: lead_id)
+                                 .where(event_type: 'task')
+                                 .where('occurred_at > ?', inbound_time)
+                                 .exists?
+
+      next if followup_task_exists
+
+      # Determine severity based on pipeline stage
+      severity = case lead.pipeline_stage
+                 when 'hot', 'active'
+                   'high'
+                 when 'nurture'
+                   'medium'
+                 else
+                   'low'
+                 end
+
+      upsert_signal(
+        lead: lead,
+        signal_type: 'unreviewed_replies',
+        severity: severity,
+        metadata: {
+          inbound_event_id: inbound_event.id,
+          inbound_channel: inbound_event.channel,
+          inbound_at: inbound_time,
+          hours_since_inbound: ((cutoff - inbound_time) / 1.hour).round(1)
+        }
+      )
+      count += 1
+    end
+
     puts "  → Created/updated #{count} signals"
   end
 
