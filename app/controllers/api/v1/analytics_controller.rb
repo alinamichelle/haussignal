@@ -150,7 +150,11 @@ module Api
                      .sort_by { |agent| agent[:name] },
           pipelines: Lead.distinct.pluck(:pipeline).compact.sort,
           sources: Lead.distinct.pluck(:source).compact.sort,
-          syncSlots: (0..3).to_a
+          syncSlots: (0..3).to_a,
+          eventCounts: [
+            { value: 'any', label: 'Has Events' },
+            { value: 'zero', label: 'Missing Events (Sync Failed)' }
+          ]
         }
 
         render json: {
@@ -161,7 +165,8 @@ module Api
             agentId: params[:agent_id],
             pipeline: params[:pipeline],
             source: params[:source],
-            syncSlot: params[:sync_slot]
+            syncSlot: params[:sync_slot],
+            eventCount: params[:event_count]
           },
           summary: {
             totalLeads: filtered_scope.count,
@@ -220,6 +225,14 @@ module Api
         scope = scope.where(pipeline: params[:pipeline]) if params[:pipeline].present?
         scope = scope.where(source: params[:source]) if params[:source].present?
         scope = scope.where(sync_slot: params[:sync_slot]) if params[:sync_slot].present?
+
+        # Filter by event count (zero events = sync failures)
+        if params[:event_count] == 'zero'
+          scope = scope.left_joins(:events).group('leads.id').having('COUNT(events.id) = 0')
+        elsif params[:event_count] == 'any'
+          scope = scope.joins(:events).group('leads.id').having('COUNT(events.id) > 0')
+        end
+
         scope
       end
     end
