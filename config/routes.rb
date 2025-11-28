@@ -34,6 +34,7 @@ Rails.application.routes.draw do
       # Analytics endpoints
       get 'analytics/overview', to: 'analytics#overview'
       get 'analytics/sync_status', to: 'analytics#sync_status'
+      get 'analytics/event_distribution', to: 'analytics#event_distribution'
 
       # Signals endpoints
       resources :signals, only: [:index] do

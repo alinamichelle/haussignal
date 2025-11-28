@@ -172,6 +172,45 @@ module Api
         }
       end
 
+      # GET /api/v1/analytics/event_distribution
+      # Debug endpoint to check which leads have zero events
+      def event_distribution
+        # Count leads with zero events
+        leads_with_zero_events = Lead.left_joins(:events)
+                                    .group('leads.id')
+                                    .having('COUNT(events.id) = 0')
+                                    .count.size
+
+        # Count leads with some events
+        leads_with_events = Lead.joins(:events)
+                               .group('leads.id')
+                               .having('COUNT(events.id) > 0')
+                               .count.size
+
+        # Get sample of leads with zero events that are marked as synced
+        false_synced_leads = Lead.left_joins(:events)
+                                .where.not(timeline_synced_at: nil)
+                                .group('leads.id')
+                                .having('COUNT(events.id) = 0')
+                                .limit(10)
+                                .pluck('leads.id', 'leads.lofty_lead_id', 'leads.full_name', 'leads.timeline_synced_at')
+
+        render json: {
+          totalLeads: Lead.count,
+          leadsWithZeroEvents: leads_with_zero_events,
+          leadsWithEvents: leads_with_events,
+          markedSyncedButZeroEvents: false_synced_leads.size,
+          sampleFalseSynced: false_synced_leads.map do |id, lofty_id, name, synced_at|
+            {
+              id: id,
+              loftyLeadId: lofty_id,
+              name: name,
+              syncedAt: synced_at
+            }
+          end
+        }
+      end
+
       private
 
       # Build filtered lead scope based on query parameters
