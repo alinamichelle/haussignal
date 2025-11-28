@@ -226,11 +226,13 @@ module Api
         scope = scope.where(source: params[:source]) if params[:source].present?
         scope = scope.where(sync_slot: params[:sync_slot]) if params[:sync_slot].present?
 
-        # Filter by event count (zero events = sync failures)
+        # Filter by event count using subqueries to avoid GROUP BY conflicts
         if params[:event_count] == 'zero'
-          scope = scope.left_joins(:events).group('leads.id').having('COUNT(events.id) = 0')
+          # Find leads with zero events using NOT EXISTS subquery
+          scope = scope.where('NOT EXISTS (SELECT 1 FROM events WHERE events.lead_id = leads.id)')
         elsif params[:event_count] == 'any'
-          scope = scope.joins(:events).group('leads.id').having('COUNT(events.id) > 0')
+          # Find leads with some events using EXISTS subquery
+          scope = scope.where('EXISTS (SELECT 1 FROM events WHERE events.lead_id = leads.id)')
         end
 
         scope
