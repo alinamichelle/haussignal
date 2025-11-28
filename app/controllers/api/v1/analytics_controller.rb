@@ -153,7 +153,8 @@ module Api
           syncSlots: (0..3).to_a,
           eventCounts: [
             { value: 'any', label: 'Has Events' },
-            { value: 'zero', label: 'Missing Events (Sync Failed)' }
+            { value: 'zero', label: 'Missing Events' },
+            { value: 'sync_failures', label: 'Sync Failures (Marked Synced + Zero Events)' }
           ]
         }
 
@@ -233,6 +234,10 @@ module Api
         elsif params[:event_count] == 'any'
           # Find leads with some events using EXISTS subquery
           scope = scope.where('EXISTS (SELECT 1 FROM events WHERE events.lead_id = leads.id)')
+        elsif params[:event_count] == 'sync_failures'
+          # Find leads marked as synced but with zero events (actual sync failures)
+          scope = scope.where.not(timeline_synced_at: nil)
+                       .where('NOT EXISTS (SELECT 1 FROM events WHERE events.lead_id = leads.id)')
         end
 
         scope
