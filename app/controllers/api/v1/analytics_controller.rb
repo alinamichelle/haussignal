@@ -68,6 +68,83 @@ module Api
           }
         }
       end
+
+      # GET /api/v1/analytics/sync_status
+      # Returns droplet sync monitoring data
+      def sync_status
+        # Get sync slot distribution
+        sync_slot_distribution = Lead.group(:sync_slot).count
+
+        # Calculate recent imports by sync slot (last 24 hours)
+        recent_imports = Lead.where('created_at >= ?', 24.hours.ago)
+                             .group(:sync_slot)
+                             .count
+
+        # Get timeline sync stats by slot
+        timeline_sync_stats = Lead.where.not(timeline_synced_at: nil)
+                                  .group(:sync_slot)
+                                  .count
+
+        # Recent timeline syncs (last hour)
+        recent_timeline_syncs = Lead.where('timeline_synced_at >= ?', 1.hour.ago)
+                                    .group(:sync_slot)
+                                    .count
+
+        # Most recent sync times per slot
+        latest_sync_per_slot = Lead.group(:sync_slot)
+                                   .maximum(:timeline_synced_at)
+
+        # Most recent imports per slot
+        latest_import_per_slot = Lead.group(:sync_slot)
+                                     .maximum(:created_at)
+
+        # Build droplet data
+        droplets = {}
+        (0..3).each do |slot|
+          droplets["droplet_#{slot}"] = {
+            slot: slot,
+            name: "Droplet #{slot}",
+            totalLeads: sync_slot_distribution[slot] || 0,
+            timelineSynced: timeline_sync_stats[slot] || 0,
+            recentImports24h: recent_imports[slot] || 0,
+            recentTimelineSync1h: recent_timeline_syncs[slot] || 0,
+            lastSyncAt: latest_sync_per_slot[slot],
+            lastImportAt: latest_import_per_slot[slot],
+            syncProgress: sync_slot_distribution[slot].to_i.zero? ? 0 :
+              ((timeline_sync_stats[slot] || 0).to_f / sync_slot_distribution[slot].to_i * 100).round(2)
+          }
+        end
+
+        # Recent imports timeline (last 100 imports)
+        recent_imports_timeline = Lead.order(created_at: :desc)
+                                      .limit(100)
+                                      .includes(:agent)
+                                      .map do |lead|
+          {
+            id: lead.id,
+            loftyLeadId: lead.lofty_lead_id,
+            name: lead.full_name || "#{lead.first_name} #{lead.last_name}".strip,
+            email: lead.email,
+            syncSlot: lead.sync_slot,
+            dropletName: "Droplet #{lead.sync_slot}",
+            agentName: lead.agent&.name,
+            createdAt: lead.created_at,
+            timelineSynced: !!lead.timeline_synced_at,
+            timelineSyncedAt: lead.timeline_synced_at
+          }
+        end
+
+        render json: {
+          droplets: droplets,
+          recentImports: recent_imports_timeline,
+          summary: {
+            totalLeads: Lead.count,
+            totalSynced: Lead.where.not(timeline_synced_at: nil).count,
+            last24hImports: Lead.where('created_at >= ?', 24.hours.ago).count,
+            last1hTimelineSync: Lead.where('timeline_synced_at >= ?', 1.hour.ago).count
+          }
+        }
+      end
     end
   end
 end
