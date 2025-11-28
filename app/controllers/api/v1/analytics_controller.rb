@@ -70,33 +70,36 @@ module Api
       end
 
       # GET /api/v1/analytics/sync_status
-      # Returns droplet sync monitoring data
+      # Returns droplet sync monitoring data with optional filtering
       def sync_status
+        # Apply filters to lead scope
+        filtered_scope = filtered_lead_scope
+
         # Get sync slot distribution
-        sync_slot_distribution = Lead.group(:sync_slot).count
+        sync_slot_distribution = filtered_scope.group(:sync_slot).count
 
         # Calculate recent imports by sync slot (last 24 hours)
-        recent_imports = Lead.where('created_at >= ?', 24.hours.ago)
-                             .group(:sync_slot)
-                             .count
+        recent_imports = filtered_scope.where('created_at >= ?', 24.hours.ago)
+                                      .group(:sync_slot)
+                                      .count
 
         # Get timeline sync stats by slot
-        timeline_sync_stats = Lead.where.not(timeline_synced_at: nil)
-                                  .group(:sync_slot)
-                                  .count
+        timeline_sync_stats = filtered_scope.where.not(timeline_synced_at: nil)
+                                           .group(:sync_slot)
+                                           .count
 
         # Recent timeline syncs (last hour)
-        recent_timeline_syncs = Lead.where('timeline_synced_at >= ?', 1.hour.ago)
-                                    .group(:sync_slot)
-                                    .count
+        recent_timeline_syncs = filtered_scope.where('timeline_synced_at >= ?', 1.hour.ago)
+                                             .group(:sync_slot)
+                                             .count
 
         # Most recent sync times per slot
-        latest_sync_per_slot = Lead.group(:sync_slot)
-                                   .maximum(:timeline_synced_at)
+        latest_sync_per_slot = filtered_scope.group(:sync_slot)
+                                            .maximum(:timeline_synced_at)
 
         # Most recent imports per slot
-        latest_import_per_slot = Lead.group(:sync_slot)
-                                     .maximum(:created_at)
+        latest_import_per_slot = filtered_scope.group(:sync_slot)
+                                              .maximum(:created_at)
 
         # Build droplet data
         droplets = {}
@@ -115,35 +118,70 @@ module Api
           }
         end
 
-        # Recent imports timeline (last 100 imports)
-        recent_imports_timeline = Lead.order(created_at: :desc)
-                                      .limit(100)
-                                      .includes(:agent)
-                                      .map do |lead|
+        # Get recent imports timeline - order by most recently synced/imported first
+        # Prioritize timeline_synced_at if available, otherwise use created_at
+        recent_imports_timeline = filtered_scope.includes(:agent)
+                                               .order(Arel.sql('COALESCE(timeline_synced_at, created_at) DESC'))
+                                               .limit(100)
+                                               .map do |lead|
           {
             id: lead.id,
             loftyLeadId: lead.lofty_lead_id,
             name: lead.full_name || "#{lead.first_name} #{lead.last_name}".strip,
             email: lead.email,
+            source: lead.source,
+            pipeline: lead.pipeline,
             syncSlot: lead.sync_slot,
             dropletName: "Droplet #{lead.sync_slot}",
             agentName: lead.agent&.name,
+            agentId: lead.agent_id,
             createdAt: lead.created_at,
             timelineSynced: !!lead.timeline_synced_at,
-            timelineSyncedAt: lead.timeline_synced_at
+            timelineSyncedAt: lead.timeline_synced_at,
+            regDate: lead.reg_date,
+            lastActivityAt: lead.timeline_synced_at || lead.created_at
           }
         end
+
+        # Get filter options for frontend
+        filter_options = {
+          agents: Lead.joins(:agent).distinct.pluck('agents.id', 'agents.name')
+                     .map { |id, name| { id: id, name: name } }
+                     .sort_by { |agent| agent[:name] },
+          pipelines: Lead.distinct.pluck(:pipeline).compact.sort,
+          sources: Lead.distinct.pluck(:source).compact.sort,
+          syncSlots: (0..3).to_a
+        }
 
         render json: {
           droplets: droplets,
           recentImports: recent_imports_timeline,
+          filterOptions: filter_options,
+          appliedFilters: {
+            agentId: params[:agent_id],
+            pipeline: params[:pipeline],
+            source: params[:source],
+            syncSlot: params[:sync_slot]
+          },
           summary: {
-            totalLeads: Lead.count,
-            totalSynced: Lead.where.not(timeline_synced_at: nil).count,
-            last24hImports: Lead.where('created_at >= ?', 24.hours.ago).count,
-            last1hTimelineSync: Lead.where('timeline_synced_at >= ?', 1.hour.ago).count
+            totalLeads: filtered_scope.count,
+            totalSynced: filtered_scope.where.not(timeline_synced_at: nil).count,
+            last24hImports: filtered_scope.where('created_at >= ?', 24.hours.ago).count,
+            last1hTimelineSync: filtered_scope.where('timeline_synced_at >= ?', 1.hour.ago).count
           }
         }
+      end
+
+      private
+
+      # Build filtered lead scope based on query parameters
+      def filtered_lead_scope
+        scope = Lead.all
+        scope = scope.where(agent_id: params[:agent_id]) if params[:agent_id].present?
+        scope = scope.where(pipeline: params[:pipeline]) if params[:pipeline].present?
+        scope = scope.where(source: params[:source]) if params[:source].present?
+        scope = scope.where(sync_slot: params[:sync_slot]) if params[:sync_slot].present?
+        scope
       end
     end
   end
