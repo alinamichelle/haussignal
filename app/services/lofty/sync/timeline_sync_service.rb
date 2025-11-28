@@ -32,8 +32,23 @@ module Lofty
 
         # Scrape ALL timeline events
         all_entries = @scraper.scrape_all_for_lead(lofty_lead_id)
-        
+
         Rails.logger.info "  📊 Scraped #{all_entries.length} timeline entries"
+
+        # Check if initial scraping returned empty (potential scraper failure)
+        if all_entries.empty?
+          if lead.timeline_synced_at.present?
+            # Already synced before - likely legitimate empty timeline
+            Rails.logger.info "  ✅ Empty timeline (already synced before) - updating sync timestamp"
+            lead.update_column(:timeline_synced_at, Time.current)
+            return { new: 0, skipped: 0, already_synced: true }
+          else
+            # First time sync with empty scrape - likely scraper failure
+            Rails.logger.warn "  ⚠️  Empty scrape result on first sync - NOT marking as synced (likely scraper failure)"
+            Rails.logger.warn "     This lead will be retried on next sync run"
+            return { new: 0, skipped: 0, first_time_empty: true, error: "scraper_empty_result" }
+          end
+        end
 
         # Filter by timestamp if incremental
         if incremental && last_synced_at
@@ -45,11 +60,19 @@ module Lofty
           
           Rails.logger.info "  🔍 #{all_entries.length} new entries (filtered out #{before_count - all_entries.length} existing)"
           
-          # If no new entries, skip processing
+          # If no new entries, be conservative about marking as synced
           if all_entries.empty?
-            Rails.logger.info "  ✅ No new activities - skipping"
-            lead.update_column(:timeline_synced_at, Time.current)
-            return { new: 0, skipped: 0, already_synced: true }
+            if lead.timeline_synced_at.present?
+              # Already synced before - likely legitimate empty on re-sync
+              Rails.logger.info "  ✅ No new activities (already synced before) - updating sync timestamp"
+              lead.update_column(:timeline_synced_at, Time.current)
+              return { new: 0, skipped: 0, already_synced: true }
+            else
+              # First time sync with empty results - could be scraper failure, don't mark as synced
+              Rails.logger.warn "  ⚠️  Empty timeline on first sync attempt - NOT marking as synced (potential scraper failure)"
+              Rails.logger.warn "     This lead will be retried on next sync run"
+              return { new: 0, skipped: 0, first_time_empty: true, error: "first_sync_empty" }
+            end
           end
         end
 
