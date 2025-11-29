@@ -9,7 +9,7 @@ module Lofty
       if mapping.nil?
         Rails.logger.warn "Unknown type_code in CanonicalClassifier: #{type_code}"
         return {
-          event_type: :unknown_event,
+          canonical_event_type: :unknown_event,
           category:   :system_internal,
           channel:    :system,
           auto:       true,
@@ -22,9 +22,8 @@ module Lofty
         return send(mapping[:handler], raw_text, parsed_event)
       end
 
-      # Return static mapping (strip out :handler)
-      mapping.slice(
-        :event_type,
+      # Return static mapping - store rich type as canonical_event_type, not event_type
+      result = mapping.slice(
         :category,
         :channel,
         :auto,
@@ -36,6 +35,10 @@ module Lofty
         :profile_change_type,
         :source
       ).compact
+      
+      # Store the rich canonical type separately (not in event_type)
+      result[:canonical_event_type] = mapping[:event_type] if mapping[:event_type]
+      result
     end
 
     # ==========================================
@@ -47,7 +50,7 @@ module Lofty
     def self.handle_103(raw_text, parsed_event)
       if raw_text.to_s.match?(/\[(Auto|Manual)\s+E-Mail\]/i)
         {
-          event_type:     :email_sent_auto,
+          canonical_event_type: :email_sent_auto,
           category:       :marketing,
           marketing_kind: :outbound,
           channel:        :email,
@@ -56,7 +59,7 @@ module Lofty
         }
       else
         {
-          event_type:   :task_completed_auto,
+          canonical_event_type: :task_completed_auto,
           category:     :task,
           task_origin:  :smart_plan,
           channel:      :system,
@@ -69,7 +72,7 @@ module Lofty
     # Type 170: Scheduled email sent
     def self.handle_170(raw_text, parsed_event)
       {
-        event_type:         :email_sent_scheduled,
+        canonical_event_type: :email_sent_scheduled,
         category:           :communication,
         communication_kind: :manual,
         channel:            :email,
@@ -83,7 +86,7 @@ module Lofty
     # Sample: "$1,150,000, 309 Wolf Ridge RD..."
     def self.handle_11(raw_text, parsed_event)
       {
-        event_type:     :property_alert_sent,
+        canonical_event_type: :property_alert_sent,
         category:       :marketing,
         marketing_kind: :outbound,
         channel:        :email,
@@ -97,7 +100,7 @@ module Lofty
     def self.handle_127(raw_text, parsed_event)
       if raw_text.to_s.match?(/\d+\s+(full|half|bath)/i)
         {
-          event_type:          :property_preference_updated,
+          canonical_event_type: :property_preference_updated,
           category:            :profile,
           profile_change_type: :contact_info_change,
           channel:             :system,
@@ -106,7 +109,7 @@ module Lofty
         }
       else
         {
-          event_type: :system_noise,
+          canonical_event_type: :system_noise,
           category:   :system_internal,
           channel:    :system,
           auto:       true,

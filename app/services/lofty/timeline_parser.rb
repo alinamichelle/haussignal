@@ -146,11 +146,21 @@ module Lofty
     end
     
     def classify_canonical(parsed_event)
-      Lofty::CanonicalClassifier.classify(
+      canonical_result = Lofty::CanonicalClassifier.classify(
         type_code: @entry.type_code,
         raw_text: @raw_text,
         parsed_event: parsed_event
       )
+
+      # If there's a canonical_event_type, merge it into metadata
+      if canonical_result[:canonical_event_type]
+        existing_metadata = parsed_event[:metadata] || {}
+        canonical_result[:metadata] = existing_metadata.merge(
+          canonical_event_type: canonical_result.delete(:canonical_event_type)
+        )
+      end
+
+      canonical_result
     end
     
     # Parse timeline data from Lofty's API JSON response
