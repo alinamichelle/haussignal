@@ -118,10 +118,11 @@ module Api
           }
         end
 
-        # Get recent imports timeline - order by most recently synced/imported first
-        # Prioritize timeline_synced_at if available, otherwise use created_at
+        # Get recent synced leads - only show leads that have been timeline synced
+        # Order by most recently synced first
         recent_imports_timeline = filtered_scope.includes(:agent)
-                                               .order(Arel.sql('COALESCE(timeline_synced_at, created_at) DESC'))
+                                               .where.not(timeline_synced_at: nil)
+                                               .order(timeline_synced_at: :desc)
                                                .limit(100)
                                                .map do |lead|
           {
@@ -150,12 +151,44 @@ module Api
                      .sort_by { |agent| agent[:name] },
           pipelines: Lead.distinct.pluck(:pipeline).compact.sort,
           sources: Lead.distinct.pluck(:source).compact.sort,
-          syncSlots: (0..3).to_a,
+          syncSlots: (0..3).to_a + ['unsubs'],
           eventCounts: [
             { value: 'any', label: 'Has Events' },
             { value: 'zero', label: 'Missing Events' },
             { value: 'sync_failures', label: 'Sync Failures (Marked Synced + Zero Events)' }
           ]
+        }
+
+        # Calculate unsubscriber scraping statistics for the specific 1207 leads
+        # Read lead IDs from the unsub target list
+        unsub_lead_ids_file = Rails.root.join('tmp', 'unsub_lead_ids.txt')
+        target_lead_ids = []
+        if File.exist?(unsub_lead_ids_file)
+          target_lead_ids = File.readlines(unsub_lead_ids_file).map(&:strip).reject(&:blank?)
+        end
+
+        total_leads_for_unsub = target_lead_ids.length > 0 ? target_lead_ids.length : 1207
+
+        # Count how many of these target leads have been scraped (have timeline_synced_at)
+        leads_scraped = 0
+        if target_lead_ids.any?
+          leads_scraped = Lead.where(lofty_lead_id: target_lead_ids)
+                             .where.not(timeline_synced_at: nil)
+                             .count
+        end
+
+        recent_unsub_events = Event.where(event_type: ['unsub', 'manual_unsub'])
+                                  .where('created_at >= ?', 24.hours.ago)
+                                  .count
+        latest_unsub_sync = Event.where(event_type: ['unsub', 'manual_unsub'])
+                                .maximum(:created_at)
+
+        unsub_stats = {
+          totalLeads: total_leads_for_unsub,
+          totalUnsubEvents: Event.where(event_type: ['unsub', 'manual_unsub']).count,
+          last24hUnsubSync: recent_unsub_events,
+          lastUnsubSyncAt: latest_unsub_sync,
+          progress: total_leads_for_unsub.zero? ? 0 : ((leads_scraped.to_f / total_leads_for_unsub) * 100).round(2)
         }
 
         render json: {
@@ -173,7 +206,8 @@ module Api
             totalLeads: filtered_scope.count,
             totalSynced: filtered_scope.where.not(timeline_synced_at: nil).count,
             last24hImports: filtered_scope.where('created_at >= ?', 24.hours.ago).count,
-            last1hTimelineSync: filtered_scope.where('timeline_synced_at >= ?', 1.hour.ago).count
+            last1hTimelineSync: filtered_scope.where('timeline_synced_at >= ?', 1.hour.ago).count,
+            unsubStats: unsub_stats
           }
         }
       end
@@ -225,7 +259,18 @@ module Api
         scope = scope.where(agent_id: params[:agent_id]) if params[:agent_id].present?
         scope = scope.where(pipeline: params[:pipeline]) if params[:pipeline].present?
         scope = scope.where(source: params[:source]) if params[:source].present?
-        scope = scope.where(sync_slot: params[:sync_slot]) if params[:sync_slot].present?
+
+        # Handle unsubs filter
+        if params[:sync_slot] == 'unsubs'
+          # Filter to only unsub target leads
+          unsub_lead_ids_file = Rails.root.join('tmp', 'unsub_lead_ids.txt')
+          if File.exist?(unsub_lead_ids_file)
+            target_lead_ids = File.readlines(unsub_lead_ids_file).map(&:strip).reject(&:blank?)
+            scope = scope.where(lofty_lead_id: target_lead_ids)
+          end
+        elsif params[:sync_slot].present?
+          scope = scope.where(sync_slot: params[:sync_slot])
+        end
 
         # Filter by event count using subqueries to avoid GROUP BY conflicts
         if params[:event_count] == 'zero'

@@ -15,7 +15,14 @@ module Lofty
         end
 
         # Scrape ALL timeline events (need emails to match unsubs)
-        all_entries = Lofty::Scrapers::TimelineScraper.new.scrape_all_for_lead(lofty_lead_id)
+        scrape_result = Lofty::Scrapers::TimelineScraper.new.scrape_all_for_lead(lofty_lead_id)
+        all_entries = scrape_result[:entries] || []
+
+        # Handle scraper failures
+        if !scrape_result[:success]
+          Rails.logger.error "Unsub sync failed - scraper error: #{scrape_result[:message]}"
+          return { error: "scraper_failed", message: scrape_result[:message] }
+        end
         
         stats = { 
           new: 0, 

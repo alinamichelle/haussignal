@@ -15,7 +15,14 @@ module Lofty
         end
 
         # Scrape all timeline events
-        all_entries = @scraper.scrape_all_for_lead(lofty_lead_id)
+        scrape_result = @scraper.scrape_all_for_lead(lofty_lead_id)
+        all_entries = scrape_result[:entries] || []
+
+        # Handle scraper failures
+        if !scrape_result[:success]
+          Rails.logger.error "Email sync failed - scraper error: #{scrape_result[:message]}"
+          return { error: "scraper_failed", message: scrape_result[:message] }
+        end
         
         stats = { 
           email_sent: 0,

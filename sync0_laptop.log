@@ -1,0 +1,5 @@
+rake aborted!
+Don't know how to build task 'lofty:sync_slot' (See the list of available tasks with `rake --tasks`)
+Did you mean?  lofty:sync_timelines
+
+(See full trace by running task with --trace)

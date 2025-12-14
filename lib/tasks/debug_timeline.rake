@@ -8,8 +8,21 @@ namespace :debug do
 
     puts "🔍 Debugging timeline for lead: #{args[:lofty_lead_id]}"
     scraper = Lofty::Scrapers::TimelineScraper.new
-    entries = scraper.scrape_all_for_lead(args[:lofty_lead_id])
-    
+    result = scraper.scrape_all_for_lead(args[:lofty_lead_id])
+
+    # Handle new scraper return format
+    if result.is_a?(Hash)
+      if !result[:success]
+        puts "❌ Scraper failed: #{result[:message]}"
+        exit 1
+      end
+      entries = result[:entries] || []
+      puts "✅ Scraper succeeded: #{result[:message]}"
+    else
+      entries = Array(result)
+      puts "⚠️  Using legacy scraper format"
+    end
+
     puts "\n📊 Found #{entries.length} total timeline entries\n"
     
     # Group by type code
@@ -22,7 +35,7 @@ namespace :debug do
         puts "\n--- Entry #{idx + 1} ---"
         puts "Event ID: #{entry.event_id}"
         puts "Timestamp: #{entry.timestamp_text}"
-        puts "Raw Text: #{entry.raw_text[0..150]}"
+        puts "Raw Text: #{(entry.raw_text || '')[0..150]}"
         puts "Data Attributes: #{entry.data_attributes.inspect}"
         puts "CSS Classes: #{entry.css_classes.inspect}"
         puts "HTML (first 200 chars): #{entry.html_content[0..200]}" if entry.html_content

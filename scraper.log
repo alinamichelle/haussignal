@@ -13,3 +13,4 @@ SyntaxError: /Users/alinavillarreal/Projects/haussignal/app/services/lofty/sync/
 /Users/alinavillarreal/Projects/haussignal/lib/tasks/lofty.rake:68:in `block (2 levels) in <main>'
 Tasks: TOP => lofty:sync_timelines
 (See full trace by running task with --trace)
+🚀 REAL-WORLD BATCH TEST - MONITORING MODE

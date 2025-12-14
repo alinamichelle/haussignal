@@ -8,8 +8,21 @@ namespace :haussignal do
 
     puts "🔍 Scraping timeline for lead: #{args[:lofty_lead_id]}"
     scraper = Lofty::Scrapers::TimelineScraper.new
-    entries = scraper.scrape_all_for_lead(args[:lofty_lead_id])
-    
+    result = scraper.scrape_all_for_lead(args[:lofty_lead_id])
+
+    # Handle new scraper return format
+    if result.is_a?(Hash)
+      if !result[:success]
+        puts "❌ Scraper failed: #{result[:message]}"
+        exit 1
+      end
+      entries = result[:entries] || []
+      puts "✅ Scraper succeeded: #{result[:message]}"
+    else
+      entries = Array(result)
+      puts "⚠️  Using legacy scraper format"
+    end
+
     puts "\n📊 Found #{entries.length} total timeline entries"
     
     # Group by type

@@ -22,7 +22,20 @@ namespace :lofty do
     # Re-scrape timeline (NO DELETE - we'll upsert)
     puts "\n📡 Scraping timeline from Lofty..."
     scraper = Lofty::Scrapers::TimelineScraper.new
-    entries = scraper.scrape_all_for_lead(lofty_lead_id)
+    result = scraper.scrape_all_for_lead(lofty_lead_id)
+
+    # Handle new scraper return format
+    if result.is_a?(Hash)
+      if !result[:success]
+        puts "❌ Scraper failed: #{result[:message]}"
+        exit 1
+      end
+      entries = result[:entries] || []
+      puts "   ✅ #{result[:message]}"
+    else
+      entries = Array(result)
+      puts "   ⚠️  Using legacy scraper format"
+    end
     puts "   Scraped #{entries.length} timeline entries"
     
     # Track which event IDs we found in this scrape
