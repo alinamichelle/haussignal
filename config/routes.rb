@@ -35,6 +35,9 @@ Rails.application.routes.draw do
       get 'analytics/overview', to: 'analytics#overview'
       get 'analytics/sync_status', to: 'analytics#sync_status'
       get 'analytics/event_distribution', to: 'analytics#event_distribution'
+      get 'analytics/pipeline-distribution', to: 'analytics#pipeline_distribution'
+      get 'analytics/agent-referral-leaderboard', to: 'analytics#agent_referral_leaderboard'
+      get 'analytics/lead-sources-current-year', to: 'analytics#lead_sources_current_year'
 
       # Signals endpoints
       resources :signals, only: [:index] do

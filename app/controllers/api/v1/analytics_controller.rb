@@ -212,6 +212,45 @@ module Api
         }
       end
 
+      # GET /api/v1/analytics/pipeline_distribution
+      # Returns pipeline distribution data for chart
+      def pipeline_distribution
+        pipeline_data = Lead.group(:pipeline).count
+        
+        render json: {
+          pipelines: pipeline_data.map { |pipeline, count| { name: pipeline || 'Unknown', count: count } }
+        }
+      end
+
+      # GET /api/v1/analytics/agent_referral_leaderboard
+      # Returns agent leaderboard with lead counts
+      def agent_referral_leaderboard
+        agent_data = Lead.joins(:agent)
+                        .group('agents.id', 'agents.name')
+                        .select('agents.id, agents.name, COUNT(leads.id) as lead_count')
+                        .order('lead_count DESC')
+                        .limit(10)
+        
+        render json: {
+          agents: agent_data.map { |a| { id: a.id, name: a.name, leadCount: a.lead_count } }
+        }
+      end
+
+      # GET /api/v1/analytics/lead_sources_current_year
+      # Returns lead sources for current year
+      def lead_sources_current_year
+        year_start = Time.current.beginning_of_year
+        source_data = Lead.where('created_at >= ?', year_start)
+                         .group(:source)
+                         .count
+                         .sort_by { |_, v| -v }
+                         .first(10)
+        
+        render json: {
+          sources: source_data.map { |source, count| { name: source || 'Unknown', count: count } }
+        }
+      end
+
       # GET /api/v1/analytics/event_distribution
       # Debug endpoint to check which leads have zero events
       def event_distribution
