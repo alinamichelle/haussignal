@@ -216,24 +216,58 @@ module Api
       # Returns pipeline distribution data for chart
       def pipeline_distribution
         pipeline_data = Lead.group(:pipeline).count
+        total = pipeline_data.values.sum
         
-        render json: {
-          pipelines: pipeline_data.map { |pipeline, count| { name: pipeline || 'Unknown', count: count } }
-        }
+        result = pipeline_data.map do |pipeline, count|
+          {
+            pipeline: pipeline || 'Unknown',
+            count: count,
+            percentage: total.zero? ? 0 : (count.to_f / total * 100).round(2)
+          }
+        end
+        
+        render json: result
       end
 
       # GET /api/v1/analytics/agent_referral_leaderboard
       # Returns agent leaderboard with lead counts
       def agent_referral_leaderboard
-        agent_data = Lead.joins(:agent)
-                        .group('agents.id', 'agents.name')
-                        .select('agents.id, agents.name, COUNT(leads.id) as lead_count')
-                        .order('lead_count DESC')
-                        .limit(10)
+        current_year = Time.current.year
+        last_year = current_year - 1
         
-        render json: {
-          agents: agent_data.map { |a| { id: a.id, name: a.name, leadCount: a.lead_count } }
-        }
+        current_year_start = Time.new(current_year, 1, 1)
+        last_year_start = Time.new(last_year, 1, 1)
+        last_year_end = Time.new(last_year, 12, 31, 23, 59, 59)
+        
+        # Get current year counts
+        current_year_data = Lead.joins(:agent)
+                               .where('leads.created_at >= ?', current_year_start)
+                               .group('agents.id', 'agents.name')
+                               .select('agents.id, agents.name, COUNT(leads.id) as lead_count')
+        
+        # Get last year counts
+        last_year_data = Lead.joins(:agent)
+                            .where('leads.created_at >= ? AND leads.created_at <= ?', last_year_start, last_year_end)
+                            .group('agents.id')
+                            .count
+        
+        result = current_year_data.map do |agent|
+          current = agent.lead_count
+          last = last_year_data[agent.id] || 0
+          growth = current - last
+          growth_pct = last.zero? ? (current.zero? ? 0 : 100) : ((growth.to_f / last) * 100).round(2)
+          
+          {
+            agentId: agent.id.to_s,
+            agentName: agent.name,
+            currentYearReferrals: current,
+            lastYearReferrals: last,
+            growth: growth,
+            growthPercentage: growth_pct
+          }
+        end.sort_by { |a| -a[:currentYearReferrals] }.first(10)
+        
+        render json: result
       end
 
       # GET /api/v1/analytics/lead_sources_current_year
@@ -243,12 +277,18 @@ module Api
         source_data = Lead.where('created_at >= ?', year_start)
                          .group(:source)
                          .count
-                         .sort_by { |_, v| -v }
-                         .first(10)
         
-        render json: {
-          sources: source_data.map { |source, count| { name: source || 'Unknown', count: count } }
-        }
+        total = source_data.values.sum
+        
+        result = source_data.map do |source, count|
+          {
+            source: source || 'Unknown',
+            count: count,
+            percentage: total.zero? ? 0 : (count.to_f / total * 100).round(2)
+          }
+        end.sort_by { |s| -s[:count] }.first(10)
+        
+        render json: result
       end
 
       # GET /api/v1/analytics/event_distribution
